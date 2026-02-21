@@ -1,11 +1,6 @@
 #ifndef _MY_IIC_H
 #define _MY_IIC_H
 
-#include <stdio.h>
-#include "sdkconfig.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "esp_log.h"
 #include "driver/i2c_master.h"
 
 #define GPIO_SDA    8

@@ -19,10 +19,10 @@
 #include "time.h"
 #include "sys/time.h"
 #include "wifi_init.h"
-#include "lv_port.h"
 #include "esp_log.h"
 #include "freertos/semphr.h"
 #include "App/app_event.h"
+#include "esp_lv_adapter.h"
 
 /*********************
  *      DEFINES
@@ -60,16 +60,17 @@ static void mpu6050_event_handler(void *event_handler_arg, esp_event_base_t even
             xSemaphoreGive(mpu6050_data_mutex);
         }
         
-        lvgl_port_lock(0);
-        snprintf(buf, sizeof(buf), "%.1f°", data->pitch);
-        lv_label_set_text(guider_ui.screen_pitch_data, buf);
-        
-        snprintf(buf, sizeof(buf), "%.1f°", data->roll);
-        lv_label_set_text(guider_ui.screen_roll_data, buf);
-        
-        snprintf(buf, sizeof(buf), "%.1f°", data->yaw);
-        lv_label_set_text(guider_ui.screen_yaw_data, buf);
-        lvgl_port_unlock();
+        if (esp_lv_adapter_lock(-1) == ESP_OK) {
+            snprintf(buf, sizeof(buf), "%.1f°", data->pitch);
+            lv_label_set_text(guider_ui.screen_pitch_data, buf);
+            
+            snprintf(buf, sizeof(buf), "%.1f°", data->roll);
+            lv_label_set_text(guider_ui.screen_roll_data, buf);
+            
+            snprintf(buf, sizeof(buf), "%.1f°", data->yaw);
+            lv_label_set_text(guider_ui.screen_yaw_data, buf);
+            esp_lv_adapter_unlock();
+        }
     }
 }
 
@@ -109,9 +110,10 @@ void update_time_display(void)
         snprintf(buf, sizeof(buf), "%02d:%02d:%02d", 
                  timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
         
-        lvgl_port_lock(0);
-        lv_label_set_text(guider_ui.screen_time, buf);
-        lvgl_port_unlock();
+        if (esp_lv_adapter_lock(-1) == ESP_OK) {
+            lv_label_set_text(guider_ui.screen_time, buf);
+            esp_lv_adapter_unlock();
+        }
     }
 }
 

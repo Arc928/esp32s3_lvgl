@@ -2691,8 +2691,8 @@ int mpu_run_self_test(long *gyro, long *accel)
     int ii;
 #endif
     int result;
-    unsigned char accel_fsr, fifo_sensors, sensors_on;
-    unsigned short gyro_fsr, sample_rate, lpf;
+    unsigned char accel_fsr = 0, fifo_sensors = 0, sensors_on = 0;
+    unsigned short gyro_fsr = 0, sample_rate = 0, lpf = 0;
     unsigned char dmp_was_on;
 
     if (st.chip_cfg.dmp_on) {

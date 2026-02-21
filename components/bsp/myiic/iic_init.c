@@ -1,4 +1,9 @@
 #include "iic_init.h"
+#include <stdio.h>
+#include "sdkconfig.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "esp_log.h"
 
 /* Global I2C bus handle - shared across all devices on the bus */
 i2c_master_bus_handle_t i2c_bus_handle = NULL;
