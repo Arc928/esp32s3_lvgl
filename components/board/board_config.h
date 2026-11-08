@@ -52,8 +52,30 @@
 /* ==================== 显示（LVGL 适配层） ==================== */
 #define BOARD_DISPLAY_ROTATION          ESP_LV_ADAPTER_ROTATE_0
 #define BOARD_DISPLAY_TEAR_AVOID_MODE   ESP_LV_ADAPTER_TEAR_AVOID_MODE_TRIPLE_PARTIAL
+/*
+ * LVGL 局部绘制缓冲的行数。TRIPLE_PARTIAL 模式下适配层把这块缓冲固定放在内部 RAM
+ * （800 x 行数 x 2 字节）：默认 50 行 = 80KB，会挤掉 Wi-Fi 初始化要的内部 RAM；
+ * 20 行 = 32KB，整屏刷新分 24 块画。
+ */
+#define BOARD_DISPLAY_BUFFER_LINES      20
 
-/* ==================== I2C 总线（MPU6050 挂在这条总线上） ==================== */
+/* ==================== I2C 总线（CH422G、GT911、MPU6050 都挂在这条总线上） ==================== */
 #define BOARD_I2C_PORT                  I2C_NUM_0
 #define BOARD_I2C_PIN_SDA               GPIO_NUM_8
 #define BOARD_I2C_PIN_SCL               GPIO_NUM_9
+
+/* ==================== IO 扩展芯片 CH422G ==================== */
+/* EXIO 脚编号（0~7），按微雪 ESP32-S3-Touch-LCD-4.3 的定义 */
+#define BOARD_EXIO_TP_RST               1       /* 触摸复位，低有效 */
+#define BOARD_EXIO_DISP                 2       /* 背光，高=亮 */
+#define BOARD_EXIO_LCD_RST              3       /* 屏幕复位，低有效 */
+#define BOARD_EXIO_SD_CS                4       /* SD 卡片选，低有效 */
+#define BOARD_EXIO_USB_SEL              5       /* GPIO19/20 的去向：低=USB 口，高=CAN 收发器 */
+
+/* 启动后的输出：背光亮，屏幕和触摸不复位，SD 不选中，GPIO19/20 走 USB */
+#define BOARD_EXIO_DEFAULT_OUTPUT       ((1U << BOARD_EXIO_TP_RST) | (1U << BOARD_EXIO_DISP) | \
+                                         (1U << BOARD_EXIO_LCD_RST) | (1U << BOARD_EXIO_SD_CS))
+
+/* ==================== 触摸 GT911（复位脚是 CH422G 的 EXIO1） ==================== */
+#define BOARD_TOUCH_PIN_INT             GPIO_NUM_4
+#define BOARD_TOUCH_I2C_SPEED_HZ        400000

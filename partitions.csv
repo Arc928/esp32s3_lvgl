@@ -1,0 +1,6 @@
+# 16MB Flash。界面带 9 张农机图片和中文字库，固件约 1.9MB，
+# 超过了 IDF 自带 singleapp_large 的 1.5MB，所以 app 分区给 4MB，其余空间留作以后扩展
+# Name,   Type, SubType, Offset,  Size, Flags
+nvs,      data, nvs,     0x9000,  0x6000,
+phy_init, data, phy,     0xf000,  0x1000,
+factory,  app,  factory, 0x10000, 4M,

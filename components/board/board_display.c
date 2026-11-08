@@ -3,12 +3,14 @@
 #include <stddef.h>
 
 #include "esp_check.h"
+#include "esp_log.h"
 #include "esp_lv_adapter.h"
 #include "board_config.h"
 
 #define TAG "board_display"
 
-esp_err_t board_display_init(esp_lcd_panel_handle_t panel_handle, lv_display_t **display)
+esp_err_t board_display_init(esp_lcd_panel_handle_t panel_handle, esp_lcd_touch_handle_t touch,
+                             lv_display_t **display)
 {
     if (panel_handle == NULL) {
         return ESP_ERR_INVALID_ARG;
@@ -25,10 +27,19 @@ esp_err_t board_display_init(esp_lcd_panel_handle_t panel_handle, lv_display_t *
         BOARD_DISPLAY_ROTATION);
     /* 和 board_lcd 计算帧缓冲数量时用的模式保持一致 */
     disp_cfg.tear_avoid_mode = BOARD_DISPLAY_TEAR_AVOID_MODE;
+    disp_cfg.profile.buffer_height = BOARD_DISPLAY_BUFFER_LINES;
 
     lv_display_t *registered_display = esp_lv_adapter_register_display(&disp_cfg);
     if (registered_display == NULL) {
         return ESP_FAIL;
+    }
+
+    /* 触摸要在启动 LVGL 任务前注册；注册失败只是没有触摸，显示照常 */
+    if (touch != NULL) {
+        esp_lv_adapter_touch_config_t touch_cfg = ESP_LV_ADAPTER_TOUCH_DEFAULT_CONFIG(registered_display, touch);
+        if (esp_lv_adapter_register_touch(&touch_cfg) == NULL) {
+            ESP_LOGW(TAG, "failed to register touch, running without touch");
+        }
     }
 
     ESP_RETURN_ON_ERROR(esp_lv_adapter_start(), TAG, "failed to start LVGL adapter");

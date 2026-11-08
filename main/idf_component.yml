@@ -15,6 +15,6 @@ dependencies:
   #   # All dependencies of `main` are public by default.
   #   public: true
   lvgl/lvgl: ^9.5.0
-  espressif/esp_lvgl_adapter: ^0.3.2
+  espressif/esp_lvgl_adapter: ^0.7.5
 
   esp_lcd_touch_gt911: "^1"
