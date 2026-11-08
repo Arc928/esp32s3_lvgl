@@ -7,145 +7,142 @@
  * terms, then you may not retain, install, activate or otherwise use the software.
  */
 
+/*
+ * UI 只负责“数据 → 控件”：
+ * 在 LVGL 定时器里向各服务读取最新数据，再刷新控件。
+ * 定时器回调运行在 LVGL 任务里，适配层已经持有 LVGL 锁，这里不用再加锁。
+ * UI 不直接访问驱动，也不订阅事件，服务层不知道 UI 的存在。
+ */
 
 /*********************
  *      INCLUDES
  *********************/
 #include <stdio.h>
+#include <string.h>
+#include <time.h>
 #include "lvgl.h"
 #include "custom.h"
-#include "misc/lv_timer.h"
-#include "mpu6050.h"
-#include "time.h"
-#include "sys/time.h"
-#include "wifi_init.h"
-#include "esp_log.h"
-#include "freertos/semphr.h"
-#include "App/app_event.h"
-#include "esp_lv_adapter.h"
+#include "imu_service.h"
 
 /*********************
  *      DEFINES
  *********************/
-#define TAG "CUSTOM"
+#define IMU_REFRESH_PERIOD_MS   100
+#define TIME_REFRESH_PERIOD_MS  1000
 
-/**********************
- *      TYPEDEFS
- **********************/
-typedef app_event_mpu6050_data_t  mpu6050_data_t;
-/**********************
- *  STATIC PROTOTYPES
- **********************/
+/*
+ * 传感器离线时的显示。
+ * GUI Guider 生成的字体只包含界面上用到的汉字，没有“传感器离线”，
+ * 所以先用英文 + LVGL 自带的警告图标（标题框宽 195px，这串约 160px）。
+ * 想换成中文：在 GUI Guider 里给 30 号字体加上这几个字，再改这里即可。
+ */
+#define IMU_OFFLINE_TITLE       LV_SYMBOL_WARNING " OFFLINE"
+#define IMU_OFFLINE_VALUE       "--"
+#define IMU_OFFLINE_COLOR       0xE5484D
 
 /**********************
  *  STATIC VARIABLES
  **********************/
-static mpu6050_data_t latest_mpu6050_data = {0};
-static SemaphoreHandle_t mpu6050_data_mutex = NULL;
-static char buf[32];
-extern lv_ui guider_ui;
+static char s_imu_title[64];            /* GUI Guider 里的原标题，恢复在线时用 */
+static lv_color_t s_imu_title_color;
+static bool s_imu_offline_shown = false;
 
-/* ==================== 事件处理函数 ==================== */
+/**********************
+ *  STATIC FUNCTIONS
+ **********************/
 
-static void mpu6050_event_handler(void *event_handler_arg, esp_event_base_t event_base,
-                                  int32_t event_id, void *event_data)
+/* 文本没变就不更新，避免无意义的重绘 */
+static void label_set_text_if_changed(lv_obj_t *label, const char *text)
 {
-    if (event_base == APP_EVENTS && event_id == APP_MPU6050_DATA_UPDATED) {
-        app_event_mpu6050_data_t *data = (app_event_mpu6050_data_t *)event_data;
-        
-        if (xSemaphoreTake(mpu6050_data_mutex, portMAX_DELAY) == pdTRUE) {
-            latest_mpu6050_data.pitch = data->pitch;
-            latest_mpu6050_data.roll = data->roll;
-            latest_mpu6050_data.yaw = data->yaw;
-            xSemaphoreGive(mpu6050_data_mutex);
+    if (strcmp(lv_label_get_text(label), text) != 0) {
+        lv_label_set_text(label, text);
+    }
+}
+
+static void imu_show_offline(lv_ui *ui)
+{
+    if (s_imu_offline_shown) {
+        return;
+    }
+    s_imu_offline_shown = true;
+
+    lv_label_set_text(ui->screen_imu_status, IMU_OFFLINE_TITLE);
+    lv_obj_set_style_text_color(ui->screen_imu_status, lv_color_hex(IMU_OFFLINE_COLOR),
+                                LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    label_set_text_if_changed(ui->screen_pitch_data, IMU_OFFLINE_VALUE);
+    label_set_text_if_changed(ui->screen_roll_data, IMU_OFFLINE_VALUE);
+    label_set_text_if_changed(ui->screen_yaw_data, IMU_OFFLINE_VALUE);
+}
+
+static void imu_show_online(lv_ui *ui)
+{
+    if (!s_imu_offline_shown) {
+        return;
+    }
+    s_imu_offline_shown = false;
+
+    lv_label_set_text(ui->screen_imu_status, s_imu_title);
+    lv_obj_set_style_text_color(ui->screen_imu_status, s_imu_title_color,
+                                LV_PART_MAIN | LV_STATE_DEFAULT);
+}
+
+static void imu_refresh_cb(lv_timer_t *timer)
+{
+    lv_ui *ui = lv_timer_get_user_data(timer);
+    app_imu_data_t data;
+    char buf[16];
+
+    if (!imu_service_get_latest(&data)) {
+        // 离线就显示离线；还在初始化时保持界面上的默认值
+        if (imu_service_get_status() == IMU_STATUS_OFFLINE) {
+            imu_show_offline(ui);
         }
-        
-        if (esp_lv_adapter_lock(-1) == ESP_OK) {
-            snprintf(buf, sizeof(buf), "%.1f°", data->pitch);
-            lv_label_set_text(guider_ui.screen_pitch_data, buf);
-            
-            snprintf(buf, sizeof(buf), "%.1f°", data->roll);
-            lv_label_set_text(guider_ui.screen_roll_data, buf);
-            
-            snprintf(buf, sizeof(buf), "%.1f°", data->yaw);
-            lv_label_set_text(guider_ui.screen_yaw_data, buf);
-            esp_lv_adapter_unlock();
-        }
+        return;
     }
+
+    imu_show_online(ui);
+
+    snprintf(buf, sizeof(buf), "%.1f°", data.pitch);
+    label_set_text_if_changed(ui->screen_pitch_data, buf);
+
+    snprintf(buf, sizeof(buf), "%.1f°", data.roll);
+    label_set_text_if_changed(ui->screen_roll_data, buf);
+
+    snprintf(buf, sizeof(buf), "%.1f°", data.yaw);
+    label_set_text_if_changed(ui->screen_yaw_data, buf);
 }
 
-/* ==================== 内部函数 ==================== */
-
-void mpu6050_get_data(mpu6050_data_t *data)
+static void time_refresh_cb(lv_timer_t *timer)
 {
-    if (xSemaphoreTake(mpu6050_data_mutex, portMAX_DELAY) == pdTRUE) {
-        *data = latest_mpu6050_data;
-        xSemaphoreGive(mpu6050_data_mutex);
-    }
-}
-
-static void mpu6050_collect_data(void)
-{
-    float pitch, roll, yaw;
-    
-    if (MPU6050_DMP_Get_Data(&pitch, &roll, &yaw) == ESP_OK) {
-        app_event_publish_mpu6050_data(pitch, roll, yaw);
-    }
-}
-
-static void mpu6050_update_timer_callback(lv_timer_t * timer)
-{
-    mpu6050_collect_data();
-}
-
-void update_time_display(void)
-{
+    lv_ui *ui = lv_timer_get_user_data(timer);
     time_t now;
     struct tm timeinfo;
-    
+    char buf[16];
+
     time(&now);
     localtime_r(&now, &timeinfo);
-    
-    if (timeinfo.tm_year >= (2016 - 1900)) {
-        snprintf(buf, sizeof(buf), "%02d:%02d:%02d", 
-                 timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
-        
-        if (esp_lv_adapter_lock(-1) == ESP_OK) {
-            lv_label_set_text(guider_ui.screen_time, buf);
-            esp_lv_adapter_unlock();
-        }
+
+    // 还没对过时，保持“校准中”
+    if (timeinfo.tm_year < (2016 - 1900)) {
+        return;
     }
+
+    snprintf(buf, sizeof(buf), "%02d:%02d:%02d",
+             timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
+    label_set_text_if_changed(ui->screen_time, buf);
 }
 
-static void sntp_sync_event_handler(void* arg, esp_event_base_t event_base,
-                                    int32_t event_id, void* event_data)
-{
-    if (event_base == WIFI_EVENTS && event_id == SNTP_SYNC_COMPLETED) {
-        ESP_LOGI(TAG, "SNTP sync completed");
-        update_time_display();
-        app_event_publish_time_initialized();
-    }
-}
-
-static void time_update_timer_callback(lv_timer_t *timer)
-{
-    update_time_display();
-}
+/**********************
+ *  GLOBAL FUNCTIONS
+ **********************/
 
 void custom_init(lv_ui *ui)
 {
-    mpu6050_data_mutex = xSemaphoreCreateMutex();
-    if (mpu6050_data_mutex == NULL) {
-        ESP_LOGE(TAG, "Failed to create mutex");
-        return;
-    }
-    
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(
-        APP_EVENTS, APP_MPU6050_DATA_UPDATED, &mpu6050_event_handler, NULL, NULL));
-    
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(
-        WIFI_EVENTS, SNTP_SYNC_COMPLETED, &sntp_sync_event_handler, NULL, NULL));
-    
-    lv_timer_create(mpu6050_update_timer_callback, 100, ui);
-    lv_timer_create(time_update_timer_callback, 1000, NULL);
+    // 记下标题原样，离线恢复后还原，不在代码里写死 GUI Guider 的文字和颜色
+    snprintf(s_imu_title, sizeof(s_imu_title), "%s", lv_label_get_text(ui->screen_imu_status));
+    s_imu_title_color = lv_obj_get_style_text_color(ui->screen_imu_status, LV_PART_MAIN);
+
+    lv_timer_create(imu_refresh_cb, IMU_REFRESH_PERIOD_MS, ui);
+    lv_timer_create(time_refresh_cb, TIME_REFRESH_PERIOD_MS, ui);
 }

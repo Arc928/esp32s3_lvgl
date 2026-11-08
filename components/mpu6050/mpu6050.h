@@ -8,7 +8,7 @@
 #include <stdio.h>
 #include "esp_log.h"
 #include "esp_rom_sys.h"
-#include "iic_init.h"
+#include "driver/i2c_master.h"
 
 // --- MPU6050 寄存器定义 (保持不变) ---
 #define MPU6050_SENSOR_ADDR         0x68        /*!< Address of the MPU6050 sensor */
@@ -55,12 +55,16 @@
 #define MPU_GYRO_ZOUTH_REG          0X47        
 #define MPU_GYRO_ZOUTL_REG          0X48
 
-#define I2C_MASTER_FREQ_HZ          400000                      /*!< I2C master clock frequency */
-#define I2C_MASTER_TIMEOUT_MS       1000
+#define MPU6050_I2C_FREQ_HZ         400000      /*!< MPU6050 的 I2C 通信速率 */
+#define MPU6050_I2C_TIMEOUT_MS      1000        /*!< 单次 I2C 传输超时 */
 
 
-
-esp_err_t MPU6050_Init(void);
+/**
+ * @brief 初始化 MPU6050（可重复调用，掉线后用于重新初始化）
+ * @param bus 设备所在的 I2C 总线句柄，由板级代码创建后传入
+ * @return ESP_OK；设备不在总线上返回 ESP_ERR_NOT_FOUND
+ */
+esp_err_t MPU6050_Init(i2c_master_bus_handle_t bus);
 esp_err_t mpu6050_register_write_byte(i2c_master_dev_handle_t dev_handle, uint8_t reg_addr, uint8_t data);
 esp_err_t mpu6050_register_read(i2c_master_dev_handle_t dev_handle, uint8_t reg_addr, uint8_t *data, size_t len);
 int i2c_read(unsigned char slave_addr, unsigned char reg_addr,
@@ -69,6 +73,6 @@ int i2c_write(unsigned char slave_addr, unsigned char reg_addr,
               unsigned char length, unsigned char const *data);
 void delay_ms(uint32_t ms); 
 uint8_t MPU6050_DMP_Get_Data(float *pitch, float *roll, float *yaw);
-void DMP_Init(void);
+esp_err_t DMP_Init(void);
 
 #endif

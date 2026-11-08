@@ -21,22 +21,25 @@ void app_event_init(void)
     ESP_LOGI(TAG, "App event system initialized");
 }
 
-void app_event_publish_mpu6050_data(float pitch, float roll, float yaw)
+void app_event_publish_imu_data(const app_imu_data_t *data)
 {
-    app_event_mpu6050_data_t data = {
-        .pitch = pitch,
-        .roll = roll,
-        .yaw = yaw
-    };
-    
-    esp_event_post(APP_EVENTS, APP_MPU6050_DATA_UPDATED, 
-                   &data, sizeof(data), portMAX_DELAY);
+    esp_event_post(APP_EVENTS, APP_IMU_DATA_UPDATED,
+                   data, sizeof(*data), portMAX_DELAY);
 }
 
-void app_event_publish_time_initialized(void)
+void app_event_publish_time_sync_started(void)
 {
-    esp_event_post(APP_EVENTS, APP_TIME_INITIALIZED, 
-                   NULL, 0, portMAX_DELAY);
+    esp_event_post(APP_EVENTS, APP_TIME_SYNC_STARTED, NULL, 0, portMAX_DELAY);
+}
+
+void app_event_publish_time_synced(void)
+{
+    esp_event_post(APP_EVENTS, APP_TIME_SYNCED, NULL, 0, portMAX_DELAY);
+}
+
+void app_event_publish_time_sync_failed(void)
+{
+    esp_event_post(APP_EVENTS, APP_TIME_SYNC_FAILED, NULL, 0, portMAX_DELAY);
 }
 
 void app_event_publish_mqtt_status(bool connected)
@@ -50,10 +53,15 @@ void app_event_publish_mqtt_status(bool connected)
 
 void app_event_publish_mqtt_publish_result(bool success, const char *topic)
 {
-    esp_event_post(APP_EVENTS, 
-                   success ? APP_MQTT_PUBLISH_SUCCESS : APP_MQTT_PUBLISH_FAILED, 
-                   (void *)topic, sizeof(topic), portMAX_DELAY);
-    
+    if (topic == NULL) {
+        topic = "";
+    }
+
+    // 事件循环会拷贝数据，长度要包含结尾的 '\0'
+    esp_event_post(APP_EVENTS,
+                   success ? APP_MQTT_PUBLISH_SUCCESS : APP_MQTT_PUBLISH_FAILED,
+                   topic, strlen(topic) + 1, portMAX_DELAY);
+
     ESP_LOGD(TAG, "MQTT publish %s: %s", success ? "success" : "failed", topic);
 }
 
@@ -70,8 +78,13 @@ void app_event_publish_sensor_error(const char *sensor_name, int error_code)
 
 void app_event_publish_network_error(const char *error_msg)
 {
-    esp_event_post(APP_EVENTS, APP_NETWORK_ERROR, 
-                   (void *)error_msg, sizeof(error_msg), portMAX_DELAY);
+    if (error_msg == NULL) {
+        error_msg = "";
+    }
+
+    // 事件循环会拷贝数据，长度要包含结尾的 '\0'
+    esp_event_post(APP_EVENTS, APP_NETWORK_ERROR,
+                   error_msg, strlen(error_msg) + 1, portMAX_DELAY);
     
     ESP_LOGE(TAG, "Network error: %s", error_msg);
 }

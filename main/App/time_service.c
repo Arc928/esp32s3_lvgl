@@ -1,3 +1,4 @@
+#include "time_service.h"
 #include <string.h>
 #include <time.h>
 #include <sys/time.h>
@@ -10,9 +11,10 @@
 #include "esp_netif_sntp.h"
 #include "lwip/ip_addr.h"
 #include "esp_sntp.h"
-#include "wifi_init.h"
+#include "esp_netif.h"
+#include "app_event.h"
 
-static const char *TAG = "sntp";
+static const char *TAG = "time_service";
 
 #ifndef INET6_ADDRSTRLEN
 #define INET6_ADDRSTRLEN 48
@@ -23,20 +25,21 @@ static bool sntp_sync_in_progress = false;
 static bool time_is_set = false;
 
 // 前向声明
-void time_sync_notification_cb(struct timeval *tv);
-void sntp_time_sync(void);
-void sntp_sync_task(void *pvParameters);
+static void time_sync_notification_cb(struct timeval *tv);
+static void sntp_time_sync(void);
+static void sntp_sync_task(void *pvParameters);
 static void sntp_event_handler(void* arg, esp_event_base_t event_base,
                                 int32_t event_id, void* event_data);
 static void print_servers(void);
 static esp_err_t sntp_sync_with_retry(int timeout_ms);
 
-// WiFi事件处理函数 - 接收WiFi连接成功事件并触发时间同步
+// 网络事件处理函数 - 拿到 IP 后触发时间同步
+// 直接订阅 ESP-IDF 的 IP_EVENT，Wi-Fi 驱动不需要知道 SNTP 的存在
 static void sntp_event_handler(void* arg, esp_event_base_t event_base,
                                 int32_t event_id, void* event_data)
 {
-    if (event_base == WIFI_EVENTS && event_id == WIFI_CONNECTED_FOR_SNTP) {
-        ESP_LOGI(TAG, "Received WiFi connected event, triggering time sync");
+    if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
+        ESP_LOGI(TAG, "Got IP, triggering time sync");
         // 如果没有正在进行的同步，触发时间同步
         if (!sntp_sync_in_progress) {
             // sntp_time_sync();    //不可以在这里直接调用这个函数，因为这个函数会阻塞
@@ -55,7 +58,7 @@ static void sntp_event_handler(void* arg, esp_event_base_t event_base,
     }
 }
 
-void time_sync_notification_cb(struct timeval *tv)
+static void time_sync_notification_cb(struct timeval *tv)
 {
     ESP_LOGI(TAG, "Time synchronization event notification");
 
@@ -64,7 +67,7 @@ void time_sync_notification_cb(struct timeval *tv)
     time_is_set = true;
 
     // 发送同步完成事件
-    esp_event_post(WIFI_EVENTS, SNTP_SYNC_COMPLETED, NULL, 0, portMAX_DELAY);
+    app_event_publish_time_synced();
 }
 
 static void print_servers(void)
@@ -101,7 +104,7 @@ static esp_err_t sntp_sync_with_retry(int timeout_ms)
     print_servers();
 
     // 发送同步开始事件
-    esp_event_post(WIFI_EVENTS, SNTP_SYNC_STARTED, NULL, 0, portMAX_DELAY);
+    app_event_publish_time_sync_started();
 
     sntp_sync_in_progress = true;
 
@@ -131,17 +134,17 @@ static esp_err_t sntp_sync_with_retry(int timeout_ms)
         ESP_LOGE(TAG, "Time synchronization failed after %d retries", max_retries);
         sntp_sync_in_progress = false;
         time_is_set = false;
-        esp_event_post(WIFI_EVENTS, SNTP_SYNC_FAILED, NULL, 0, portMAX_DELAY);
+        app_event_publish_time_sync_failed();
         return ESP_ERR_TIMEOUT;
     }
 }
 
-void time_init()
+void time_service_start(void)
 {
     // 注册事件处理程序
     ESP_ERROR_CHECK(esp_event_handler_instance_register(
-        WIFI_EVENTS,
-        WIFI_CONNECTED_FOR_SNTP,
+        IP_EVENT,
+        IP_EVENT_STA_GOT_IP,
         &sntp_event_handler,
         NULL,
         NULL));
@@ -171,7 +174,7 @@ void time_init()
     ESP_LOGI(TAG, "Current date/time in Shanghai: %s", strftime_buf);
 }
 
-void sntp_time_sync(void)
+static void sntp_time_sync(void)
 {
     // 如果时间已设置且不在同步中，这里可以选择是否重新同步
     // 根据你的需求，这里设置为每次WiFi连接都同步
@@ -201,7 +204,7 @@ void sntp_time_sync(void)
 }
 
 // 任务函数：专门负责后台同步
-void sntp_sync_task(void *pvParameters) 
+static void sntp_sync_task(void *pvParameters) 
 {
     ESP_LOGI("SNTP_TASK", "同步任务启动...");
     

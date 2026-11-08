@@ -1,4 +1,11 @@
-#include "wifi_init.h"
+#include "net_service.h"
+
+#if __has_include("wifi_secrets.h")
+#include "wifi_secrets.h"
+#else
+#error "缺少 wifi_secrets.h：请复制 wifi_secrets.h.example 为 wifi_secrets.h 并填写 Wi-Fi 名称和密码"
+#endif
+
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -19,9 +26,11 @@ static EventGroupHandle_t s_wifi_event_group;
  * - we failed to connect after the maximum amount of retries */
 #define WIFI_CONNECTED_BIT BIT0
 #define WIFI_FAIL_BIT      BIT1
-#define TAG "wifi init"
+#define TAG "net_service"
 
-ESP_EVENT_DEFINE_BASE(WIFI_EVENTS);
+#define EXAMPLE_ESP_MAXIMUM_RETRY           5
+#define ESP_WIFI_SCAN_AUTH_MODE_THRESHOLD   WIFI_AUTH_WPA2_PSK
+
 static int s_retry_num = 0;
 
 static void event_handler(void* arg, esp_event_base_t event_base,
@@ -43,13 +52,10 @@ static void event_handler(void* arg, esp_event_base_t event_base,
         ESP_LOGI(TAG, "got ip:" IPSTR, IP2STR(&event->ip_info.ip));
         s_retry_num = 0;
         xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
-
-        // 发送事件通知其他模块（SNTP）WiFi已连接
-        esp_event_post(WIFI_EVENTS, WIFI_CONNECTED_FOR_SNTP, NULL, 0, portMAX_DELAY);
     }
 }
 
-void wifi_init_sta(void)
+void net_service_start(void)
 {
     s_wifi_event_group = xEventGroupCreate();
 
@@ -76,8 +82,8 @@ void wifi_init_sta(void)
 
     wifi_config_t wifi_config = {
         .sta = {
-            .ssid = EXAMPLE_ESP_WIFI_SSID,
-            .password = EXAMPLE_ESP_WIFI_PASS,
+            .ssid = WIFI_STA_SSID,
+            .password = WIFI_STA_PASSWORD,
             /* Authmode threshold resets to WPA2 as default if password matches WPA2 standards (password len => 8).
              * If you want to connect the device to deprecated WEP/WPA networks, Please set the threshold value
              * to WIFI_AUTH_WEP/WIFI_AUTH_WPA_PSK and set the password with length and format matching to
@@ -92,7 +98,7 @@ void wifi_init_sta(void)
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config) );
     ESP_ERROR_CHECK(esp_wifi_start() );
 
-    ESP_LOGI(TAG, "wifi_init_sta finished.");
+    ESP_LOGI(TAG, "Wi-Fi STA started");
 
     /* Waiting until either the connection is established (WIFI_CONNECTED_BIT) or connection failed for the maximum
      * number of re-tries (WIFI_FAIL_BIT). The bits are set by event_handler() (see above) */
@@ -105,11 +111,9 @@ void wifi_init_sta(void)
     /* xEventGroupWaitBits() returns the bits before the call returned, hence we can test which event actually
      * happened. */
     if (bits & WIFI_CONNECTED_BIT) {
-        ESP_LOGI(TAG, "connected to ap SSID:%s password:%s",
-                 EXAMPLE_ESP_WIFI_SSID, EXAMPLE_ESP_WIFI_PASS);
+        ESP_LOGI(TAG, "connected to ap SSID:%s", WIFI_STA_SSID);
     } else if (bits & WIFI_FAIL_BIT) {
-        ESP_LOGI(TAG, "Failed to connect to SSID:%s, password:%s",
-                 EXAMPLE_ESP_WIFI_SSID, EXAMPLE_ESP_WIFI_PASS);
+        ESP_LOGI(TAG, "Failed to connect to SSID:%s", WIFI_STA_SSID);
     } else {
         ESP_LOGE(TAG, "UNEXPECTED EVENT");
     }

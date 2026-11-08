@@ -1,16 +1,30 @@
+/*
+ * 启动编排：只负责按顺序初始化各层，具体实现都在各模块里
+ *
+ *   UI（main/UI）          界面，只读服务的数据
+ *   服务（main/App）        imu / time / net 服务 + 应用事件
+ *   板级（components/board）引脚、屏幕、I2C 总线、LVGL 显示
+ *   驱动（components/mpu6050）
+ */
+
 #include <stdio.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "mpu6050.h"
-#include "iic_init.h"
-#include "wifi_init.h"
-#include "sntp.h"
+#include "esp_log.h"
 #include "nvs_flash.h"
+#include "esp_lv_adapter.h"
+
+#include "board_lcd.h"
+#include "board_i2c.h"
+#include "board_display.h"
+
+#include "App/app_event.h"
+#include "App/imu_service.h"
+#include "App/time_service.h"
+#include "App/net_service.h"
+
 #include "gui_guider.h"
 #include "custom.h"
-#include "App/app_event.h"
-#include "rgb_init.h"
-#include "lvgl_init.h"
 
 #define TAG "main"
 
@@ -30,33 +44,35 @@ void app_main(void)
     // 2) Initialize app event system
     app_event_init();
 
-    // Initialize RGB LCD panel driver and get panel handle
+    // 3) Initialize RGB LCD panel
     ESP_LOGI(TAG, "Install RGB LCD panel driver");
     esp_lcd_panel_handle_t panel_handle = NULL;
-    ESP_ERROR_CHECK(rgb_init_panel(&panel_handle));
+    ESP_ERROR_CHECK(board_lcd_init(&panel_handle));
 
-    // 3) Initialize low-level peripherals (I2C and MPU6050)
-    i2c_bus_init();
-    ESP_ERROR_CHECK(MPU6050_Init());
-    DMP_Init();
+    // 4) Initialize I2C bus, then start IMU service.
+    //    Sensor init runs in the service task; if the sensor is missing the
+    //    device keeps running, the UI shows offline and the service retries.
+    i2c_master_bus_handle_t i2c_bus = NULL;
+    ESP_ERROR_CHECK(board_i2c_init(&i2c_bus));
+    if (imu_service_start(i2c_bus) != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start IMU service");
+    }
 
-    // 4) Initialize LVGL display and bind RGB panel
-    lv_display_t *disp = NULL;
-    ESP_ERROR_CHECK(lvgl_init_display(panel_handle, &disp));
-    (void)disp;
-    
-    // 5) Build and initialize UI under LVGL lock
+    // 5) Initialize LVGL display and bind RGB panel
+    ESP_ERROR_CHECK(board_display_init(panel_handle, NULL));
+
+    // 6) Build and initialize UI under LVGL lock
     if (esp_lv_adapter_lock(-1) == ESP_OK) {
         setup_ui(&guider_ui);
         custom_init(&guider_ui);
         esp_lv_adapter_unlock();
     }
 
-    // 6) Start network and SNTP time sync
-    time_init();
-    wifi_init_sta();
+    // 7) Start SNTP time sync (waits for IP), then connect Wi-Fi
+    time_service_start();
+    net_service_start();
 
-    // 7) Main loop (currently keeps task alive)
+    // 8) Main loop (currently keeps task alive)
     while (1)
     {
         vTaskDelay(pdMS_TO_TICKS(1000));

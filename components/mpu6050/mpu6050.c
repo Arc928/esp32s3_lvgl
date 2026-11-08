@@ -86,7 +86,7 @@ void delay_ms(uint32_t ms)
  */
 esp_err_t mpu6050_register_read(i2c_master_dev_handle_t dev_handle, uint8_t reg_addr, uint8_t *data, size_t len)
 {
-    return i2c_master_transmit_receive(dev_handle, &reg_addr, 1, data, len, I2C_MASTER_TIMEOUT_MS / portTICK_PERIOD_MS);
+    return i2c_master_transmit_receive(dev_handle, &reg_addr, 1, data, len, MPU6050_I2C_TIMEOUT_MS / portTICK_PERIOD_MS);
 }
 
 /**
@@ -95,7 +95,7 @@ esp_err_t mpu6050_register_read(i2c_master_dev_handle_t dev_handle, uint8_t reg_
 esp_err_t mpu6050_register_write_byte(i2c_master_dev_handle_t dev_handle, uint8_t reg_addr, uint8_t data)
 {
     uint8_t write_buf[2] = {reg_addr, data};
-    return i2c_master_transmit(dev_handle, write_buf, sizeof(write_buf), I2C_MASTER_TIMEOUT_MS / portTICK_PERIOD_MS);
+    return i2c_master_transmit(dev_handle, write_buf, sizeof(write_buf), MPU6050_I2C_TIMEOUT_MS / portTICK_PERIOD_MS);
 }
 
 /**
@@ -170,9 +170,29 @@ esp_err_t MPU6050ReadID(void)
     }
 }
 
-esp_err_t MPU6050_Init(void)
+esp_err_t MPU6050_Init(i2c_master_bus_handle_t bus)
 {
-    i2c_device_init(MPU6050_SENSOR_ADDR, &dev_handle, I2C_MASTER_FREQ_HZ);
+    if (bus == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    // 先探测设备是否在总线上；不在就直接返回，避免后面一连串 I2C 报错
+    if (i2c_master_probe(bus, MPU6050_SENSOR_ADDR, MPU6050_I2C_TIMEOUT_MS) != ESP_OK) {
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    // 设备句柄只添加一次，掉线后重新初始化时复用
+    if (dev_handle == NULL) {
+        i2c_device_config_t dev_config = {
+            .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+            .device_address = MPU6050_SENSOR_ADDR,
+            .scl_speed_hz = MPU6050_I2C_FREQ_HZ,
+        };
+        esp_err_t ret = i2c_master_bus_add_device(bus, &dev_config, &dev_handle);
+        if (ret != ESP_OK) {
+            return ret;
+        }
+    }
     vTaskDelay(pdMS_TO_TICKS(10));
     //复位6050
     mpu6050_register_write_byte(dev_handle, MPU6050_RA_PWR_MGMT_1, 0x80);
@@ -228,7 +248,7 @@ int i2c_write(unsigned char slave_addr, unsigned char reg_addr,
     memcpy(&write_buf[1], data, length);
     
     esp_err_t ret = i2c_master_transmit(dev_handle, write_buf, length + 1, 
-                                         I2C_MASTER_TIMEOUT_MS / portTICK_PERIOD_MS);
+                                         MPU6050_I2C_TIMEOUT_MS / portTICK_PERIOD_MS);
     
     return (ret == ESP_OK) ? 0 : -1;
 }
@@ -255,70 +275,100 @@ int i2c_read(unsigned char slave_addr, unsigned char reg_addr,
     esp_err_t ret = i2c_master_transmit_receive(dev_handle, 
                                                 &reg_addr, 1, 
                                                 data, length, 
-                                                I2C_MASTER_TIMEOUT_MS / portTICK_PERIOD_MS);
+                                                MPU6050_I2C_TIMEOUT_MS / portTICK_PERIOD_MS);
 
     return (ret == ESP_OK) ? 0 : -1;
 }
 
 // DMP（数字运动处理器）初始化函数
-void DMP_Init(void)
-{ 
-    // uint8_t temp[1]={0};
-    // temp[0] = MPU6050ReadID();          // 读取MPU6050设备ID
-    // if(temp[0]!=0x68) printf("dmp ID false"); // 校验设备ID是否为0x68（正常值），错误则系统复位
+// 芯片初始化、固件加载、开启 DMP 这三步失败就无法输出姿态，返回错误；
+// 其余配置步骤失败只打警告（与原先行为一致，不中断初始化）
+esp_err_t DMP_Init(void)
+{
+    static const char *TAG = "DMP";
 
-    // 主初始化流程
-    if(!mpu_init()) // 成功返回0，初始化MPU6050底层,与步骤7相呼应
-    {
-        // 配置传感器使能状态
-        if(!mpu_set_sensors(INV_XYZ_GYRO | INV_XYZ_ACCEL)) {} // 启用陀螺仪和加速度计的三轴数据
-        
-        // FIFO配置
-        if(!mpu_configure_fifo(INV_XYZ_GYRO | INV_XYZ_ACCEL)) {} // 配置FIFO存储陀螺仪和加速度计数据
-        
-        // 采样率设置
-        if(!mpu_set_sample_rate(DEFAULT_MPU_HZ)) {} // 设置采样率为默认值（典型值如100Hz）
-        
-        // DMP固件加载
-        if(!dmp_load_motion_driver_firmware()) {} // 加载DMP运动驱动固件
-        
-        // 方向矩阵配置
-        if(!dmp_set_orientation(inv_orientation_matrix_to_scalar(gyro_orientation))) {} // 设置传感器方向校准矩阵
-        
-        // 启用DMP特性
-        if(!dmp_enable_feature(DMP_FEATURE_6X_LP_QUAT | DMP_FEATURE_TAP |  // 启用6轴低功耗四元数 | 敲击检测
-                DMP_FEATURE_ANDROID_ORIENT | DMP_FEATURE_SEND_RAW_ACCEL |   // Android方向识别 | 原始加速度数据
-                DMP_FEATURE_SEND_CAL_GYRO | DMP_FEATURE_GYRO_CAL)) {}       // 校准后的陀螺仪数据 | 陀螺仪校准
-        
-        // FIFO速率设置
-        if(!dmp_set_fifo_rate(DEFAULT_MPU_HZ)) {} // 设置DMP输出速率与采样率同步
-        
-        run_self_test(); // 运行自检程序（校准传感器）
-        
-        // 启用DMP
-        if(!mpu_set_dmp_state(1)) {} // 激活DMP功能（1=启用，0=关闭）
+    // 主初始化流程（成功返回0）
+    if (mpu_init()) {
+        ESP_LOGE(TAG, "mpu_init failed");
+        return ESP_FAIL;
     }
 
+    // 配置传感器使能状态：启用陀螺仪和加速度计的三轴数据
+    if (mpu_set_sensors(INV_XYZ_GYRO | INV_XYZ_ACCEL))
+        ESP_LOGW(TAG, "mpu_set_sensors failed");
+
+    // FIFO配置：存储陀螺仪和加速度计数据
+    if (mpu_configure_fifo(INV_XYZ_GYRO | INV_XYZ_ACCEL))
+        ESP_LOGW(TAG, "mpu_configure_fifo failed");
+
+    // 采样率设置
+    if (mpu_set_sample_rate(DEFAULT_MPU_HZ))
+        ESP_LOGW(TAG, "mpu_set_sample_rate failed");
+
+    // DMP固件加载
+    if (dmp_load_motion_driver_firmware()) {
+        ESP_LOGE(TAG, "failed to load DMP firmware");
+        return ESP_FAIL;
+    }
+
+    // 方向矩阵配置
+    if (dmp_set_orientation(inv_orientation_matrix_to_scalar(gyro_orientation)))
+        ESP_LOGW(TAG, "dmp_set_orientation failed");
+
+    // 启用DMP特性
+    if (dmp_enable_feature(DMP_FEATURE_6X_LP_QUAT | DMP_FEATURE_TAP |  // 6轴低功耗四元数 | 敲击检测
+            DMP_FEATURE_ANDROID_ORIENT | DMP_FEATURE_SEND_RAW_ACCEL |  // Android方向识别 | 原始加速度数据
+            DMP_FEATURE_SEND_CAL_GYRO | DMP_FEATURE_GYRO_CAL))         // 校准后的陀螺仪数据 | 陀螺仪校准
+        ESP_LOGW(TAG, "dmp_enable_feature failed");
+
+    // FIFO速率设置：DMP输出速率与采样率同步
+    if (dmp_set_fifo_rate(DEFAULT_MPU_HZ))
+        ESP_LOGW(TAG, "dmp_set_fifo_rate failed");
+
+    run_self_test(); // 运行自检程序（校准传感器）
+
+    // 启用DMP
+    if (mpu_set_dmp_state(1)) {
+        ESP_LOGE(TAG, "failed to enable DMP");
+        return ESP_FAIL;
+    }
+
+    return ESP_OK;
 }
 
 uint8_t MPU6050_DMP_Get_Data(float *pitch, float *roll, float *yaw)
 {
     unsigned long sensor_timestamp;
-    unsigned char more;
+    unsigned char more = 0;
     long quat[4];
-    float q0, q1, q2, q3;  
-    
-    // 从DMP FIFO读取四元数数据
-    if (dmp_read_fifo(gyro, accel, quat, &sensor_timestamp, &sensors, &more))
-        return 1;
+    long latest_quat[4];
+    int has_quat = 0;
+    float q0, q1, q2, q3;
+
+    // DMP 以 200Hz 往 FIFO 写数据，调用方读得更慢。
+    // 这里一次把 FIFO 读空，只用最新一包，避免数据滞后和 FIFO 溢出。
+    // FIFO 最多 1024 字节，按每包 32 字节算不超过 32 包，循环上限留了余量。
+    for (int i = 0; i < 40; i++) {
+        if (dmp_read_fifo(gyro, accel, quat, &sensor_timestamp, &sensors, &more))
+            break;
+        if (sensors & INV_WXYZ_QUAT) {
+            latest_quat[0] = quat[0];
+            latest_quat[1] = quat[1];
+            latest_quat[2] = quat[2];
+            latest_quat[3] = quat[3];
+            has_quat = 1;
+        }
+        if (!more)
+            break;
+    }
 
     // 四元数数据解析（q30格式转浮点）
-    if (sensors & INV_WXYZ_QUAT)
+    if (has_quat)
     {
-        q0 = quat[0] / q30;
-        q1 = quat[1] / q30;
-        q2 = quat[2] / q30;
-        q3 = quat[3] / q30;
+        q0 = latest_quat[0] / q30;
+        q1 = latest_quat[1] / q30;
+        q2 = latest_quat[2] / q30;
+        q3 = latest_quat[3] / q30;
 
         // 欧拉角计算（单位：度）
         *pitch = asin(-2 * q1 * q3 + 2 * q0 * q2) * 57.3;  // 俯仰角
