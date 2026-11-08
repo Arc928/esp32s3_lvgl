@@ -22,7 +22,7 @@
 #include "machine_view.h"
 
 #define REFRESH_MS      500U
-#define PAGE_SWITCH_MS  300U
+#define PAGE_SWITCH_MS  200U  /* OVER_*：新页盖上来，旧页不动，每帧重绘量约为 MOVE_* 的一半 */
 
 static lv_obj_t *s_home;
 static lv_obj_t *s_detail;
@@ -51,7 +51,7 @@ static void open_machine(uint32_t machine_index)
     }
     machine_view_set_machine(machine_index);
     refresh(NULL);
-    lv_screen_load_anim(s_detail, LV_SCREEN_LOAD_ANIM_MOVE_LEFT, PAGE_SWITCH_MS, 0, false);
+    lv_screen_load_anim(s_detail, LV_SCREEN_LOAD_ANIM_OVER_LEFT, PAGE_SWITCH_MS, 0, false);
 }
 
 /* The home page slides in following the finger (or from the left for "返回"). */
@@ -65,7 +65,7 @@ static void slide_home(lv_screen_load_anim_t anim)
 
 static void go_home(void)
 {
-    slide_home(LV_SCREEN_LOAD_ANIM_MOVE_RIGHT);
+    slide_home(LV_SCREEN_LOAD_ANIM_OVER_RIGHT);
 }
 
 /* A swipe to the left or to the right goes back home. */
@@ -78,7 +78,7 @@ static void on_detail_gesture(lv_event_t *e)
         return;
     }
     lv_indev_wait_release(lv_indev_active());
-    slide_home(dir == LV_DIR_LEFT ? LV_SCREEN_LOAD_ANIM_MOVE_LEFT : LV_SCREEN_LOAD_ANIM_MOVE_RIGHT);
+    slide_home(dir == LV_DIR_LEFT ? LV_SCREEN_LOAD_ANIM_OVER_LEFT : LV_SCREEN_LOAD_ANIM_OVER_RIGHT);
 }
 
 void custom_init(lv_ui *ui)
