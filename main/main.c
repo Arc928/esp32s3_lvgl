@@ -2,7 +2,7 @@
  * 启动编排：只负责按顺序初始化各层，具体实现都在各模块里
  *
  *   UI（main/UI）          界面，只读服务的数据
- *   服务（main/App）        imu / time / net 服务 + 应用事件
+ *   服务（main/App）        imu / time / net / mqtt 服务 + 应用事件
  *   板级（components/board）引脚、屏幕、I2C 总线、IO 扩展、触摸、LVGL 显示
  *   驱动（components/mpu6050）
  */
@@ -25,6 +25,7 @@
 #include "App/imu_service.h"
 #include "App/time_service.h"
 #include "App/net_service.h"
+#include "App/mqtt_service.h"
 
 #include "gui_guider.h"
 #include "custom.h"
@@ -93,8 +94,12 @@ void app_main(void)
     }
     log_free_heap("UI");
 
-    // 8) Start SNTP time sync (waits for IP), then connect Wi-Fi
+    // 8) Start SNTP time sync and MQTT (both wait for IP), then connect Wi-Fi.
+    //    If the broker is unreachable the device keeps running and esp-mqtt retries.
     time_service_start();
+    if (mqtt_service_start() != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start MQTT service");
+    }
     net_service_start();
     log_free_heap("Wi-Fi start");
 
