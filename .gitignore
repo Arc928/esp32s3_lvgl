@@ -1,5 +1,6 @@
 build/
-#sdkconfig
+# IDF 生成的，由 sdkconfig.defaults 和 sdkconfig.defaults.esp32s3 决定；改配置请改这两个文件
+sdkconfig
 sdkconfig.old
 managed_components/
 README.md
@@ -7,3 +8,5 @@ README.md
 # 本地 Wi-Fi / MQTT 凭据
 main/App/wifi_secrets.h
 main/App/mqtt_secrets.h
+# 编辑器本地配置（含本机路径和串口号）
+.vscode/
