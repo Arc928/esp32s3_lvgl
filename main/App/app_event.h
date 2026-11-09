@@ -28,7 +28,7 @@ typedef enum {
     APP_TIME_SYNCED,               // SNTP 对时完成，系统时间可用
     APP_TIME_SYNC_FAILED,          // SNTP 对时超时
 
-    /* MQTT 相关事件（预留给后续使用） */
+    /* MQTT 相关事件（由 mqtt_service 发布） */
     APP_MQTT_CONNECTED,            // MQTT 连接成功
     APP_MQTT_DISCONNECTED,         // MQTT 断开连接
     APP_MQTT_PUBLISH_SUCCESS,      // MQTT 发布成功
