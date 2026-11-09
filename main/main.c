@@ -15,9 +15,12 @@
 #include "nvs_flash.h"
 #include "esp_lv_adapter.h"
 
+#include "board_config.h"
 #include "board_lcd.h"
 #include "board_i2c.h"
+#if BOARD_HAS_EXIO
 #include "board_exio.h"
+#endif
 #include "board_touch.h"
 #include "board_display.h"
 
@@ -57,22 +60,26 @@ void app_main(void)
     // 2) Initialize app event system
     app_event_init();
 
-    // 3) Initialize I2C bus, then the CH422G IO expander and GT911 touch on it.
-    //    The expander drives the LCD reset and backlight, so it goes before the
-    //    panel. Without touch the device still runs, the UI just can't be tapped.
+    // 3) Initialize I2C bus, then GT911 touch on it. On boards with a CH422G IO
+    //    expander (ESP32-S3) the expander drives the LCD reset, backlight and touch
+    //    reset, so it goes first. Without touch the device still runs, the UI just
+    //    can't be tapped.
     i2c_master_bus_handle_t i2c_bus = NULL;
     ESP_ERROR_CHECK(board_i2c_init(&i2c_bus));
 
     esp_lcd_touch_handle_t touch = NULL;
+#if BOARD_HAS_EXIO
     if (board_exio_init(i2c_bus) != ESP_OK) {
         ESP_LOGE(TAG, "CH422G IO expander not responding, touch disabled");
-    } else if (board_touch_init(i2c_bus, &touch) != ESP_OK) {
+    } else
+#endif
+    if (board_touch_init(i2c_bus, &touch) != ESP_OK) {
         ESP_LOGW(TAG, "Touch not available, running without touch");
         touch = NULL;
     }
 
-    // 4) Initialize RGB LCD panel
-    ESP_LOGI(TAG, "Install RGB LCD panel driver");
+    // 4) Initialize LCD panel (RGB on ESP32-S3, MIPI DSI on ESP32-P4)
+    ESP_LOGI(TAG, "Install LCD panel driver");
     esp_lcd_panel_handle_t panel_handle = NULL;
     ESP_ERROR_CHECK(board_lcd_init(&panel_handle));
 

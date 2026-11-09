@@ -1,0 +1,37 @@
+# ESP32-P4 default configuration (Waveshare ESP32-P4-WIFI6-Touch-LCD-7B)
+# P4 用单独的 build 目录和 sdkconfig，不影响 S3 的构建（IDF 5.5.5）；依赖锁文件按芯片分开（见 CMakeLists.txt）：
+#   idf.py -B build_p4 -D SDKCONFIG=sdkconfig.p4 set-target esp32p4
+#   idf.py -B build_p4 -D SDKCONFIG=sdkconfig.p4 build
+
+CONFIG_IDF_TARGET="esp32p4"
+
+# 芯片版本：微雪目前出货的是 v3.x（官方示例也是这个），v1.x（rev1.3 系列）的板子需要换成
+#   CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y 和 CONFIG_ESP32P4_REV_MIN_100=y
+# 编出来的固件和芯片版本不匹配时，启动时会直接报 chip revision 错误。
+# 看芯片版本：烧录时 esptool 会打印 "Chip is ESP32-P4 (revision vX.Y)"
+CONFIG_ESP32P4_REV_MIN_300=y
+
+# P4 的分区表在 0x8000，引导程序最大只有 24KB；默认的日志等级编出来会超出几十字节
+CONFIG_BOOTLOADER_LOG_LEVEL_WARN=y
+
+# 板子是 32MB flash（分区表里 app 分区 4MB，其余留作以后扩展）
+CONFIG_ESPTOOLPY_FLASHSIZE_32MB=y
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+CONFIG_SPI_FLASH_SUPPORT_GD_CHIP=y
+
+# 32MB PSRAM（封装内），200MHz 在 P4 上还是实验特性，需要打开 IDF_EXPERIMENTAL_FEATURES
+CONFIG_IDF_EXPERIMENTAL_FEATURES=y
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_SPEED_200M=y
+CONFIG_SPIRAM_XIP_FROM_PSRAM=y
+CONFIG_SPIRAM_MEMTEST=n
+CONFIG_CACHE_L2_CACHE_256KB=y
+CONFIG_CACHE_L2_CACHE_LINE_128B=y
+
+# app_main 里要建整个界面，默认的 3584 字节栈不够稳妥
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+
+# 只用 STA，不要 SoftAP（和微雪 05_wifistation 示例一致）
+CONFIG_ESP_WIFI_SOFTAP_SUPPORT=n
+
+CONFIG_LV_DRAW_SW_DRAW_UNIT_CNT=2

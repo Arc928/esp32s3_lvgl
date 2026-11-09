@@ -1,6 +1,6 @@
 /*
  * board_display.h
- * 把 RGB 屏和触摸注册到 LVGL（通过 esp_lvgl_adapter），并启动 LVGL 任务
+ * 把屏幕（RGB 或 MIPI DSI）和触摸注册到 LVGL（通过 esp_lvgl_adapter），并启动 LVGL 任务
  */
 
 #pragma once

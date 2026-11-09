@@ -1,4 +1,8 @@
 build/
+# ESP32-P4 的构建目录和配置（和 S3 分开，见 sdkconfig.defaults.esp32p4）
+build_p4/
+sdkconfig.p4
+sdkconfig.p4.old
 # IDF 生成的，由 sdkconfig.defaults 和 sdkconfig.defaults.esp32s3 决定；改配置请改这两个文件
 sdkconfig
 sdkconfig.old

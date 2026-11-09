@@ -10,12 +10,15 @@
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_touch_gt911.h"
 #include "board_config.h"
+#if BOARD_HAS_EXIO
 #include "board_exio.h"
+#endif
 
 #define TAG "board_touch"
 
 #define PROBE_TIMEOUT_MS    50
 
+#if BOARD_HAS_EXIO
 /*
  * GT911 在复位脚释放的那一刻看 INT 脚的电平来决定 I2C 地址：低=0x5D，高=0x14。
  * 复位脚接在 CH422G 上，GT911 驱动自带的复位用不了，所以在这里做：
@@ -45,6 +48,7 @@ static esp_err_t gt911_reset(void)
 
     return ESP_OK;
 }
+#endif /* BOARD_HAS_EXIO */
 
 /* 一般在 0x5D；万一地址没选上，再试一下另一个 */
 static esp_err_t gt911_find_address(i2c_master_bus_handle_t bus, uint8_t *addr)
@@ -72,7 +76,9 @@ esp_err_t board_touch_init(i2c_master_bus_handle_t bus, esp_lcd_touch_handle_t *
         return ESP_ERR_INVALID_ARG;
     }
 
+#if BOARD_HAS_EXIO
     ESP_RETURN_ON_ERROR(gt911_reset(), TAG, "GT911 reset failed");
+#endif
     ESP_RETURN_ON_ERROR(gt911_find_address(bus, &addr), TAG, "GT911 not found on I2C bus");
 
     esp_lcd_panel_io_i2c_config_t io_cfg = ESP_LCD_TOUCH_IO_I2C_GT911_CONFIG();
@@ -86,6 +92,10 @@ esp_err_t board_touch_init(i2c_master_bus_handle_t bus, esp_lcd_touch_handle_t *
         .y_max = BOARD_LCD_V_RES,
         .rst_gpio_num = GPIO_NUM_NC,
         .int_gpio_num = GPIO_NUM_NC,
+        .flags = {
+            .mirror_x = BOARD_TOUCH_MIRROR_X,
+            .mirror_y = BOARD_TOUCH_MIRROR_Y,
+        },
     };
     esp_err_t ret = esp_lcd_touch_new_i2c_gt911(io, &touch_cfg, touch);
     if (ret != ESP_OK) {

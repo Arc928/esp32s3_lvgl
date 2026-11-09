@@ -1,6 +1,8 @@
 /*
  * board_touch.h
- * GT911 电容触摸（I2C，复位脚在 CH422G 上，先调用 board_exio_init）
+ * GT911 电容触摸（I2C）
+ * S3 板（BOARD_HAS_EXIO=1）：复位脚在 CH422G 上，要先调用 board_exio_init；
+ * P4 板：复位脚和中断脚都没引出，直接探测地址、轮询读取
  */
 
 #pragma once

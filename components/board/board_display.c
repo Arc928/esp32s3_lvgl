@@ -19,7 +19,11 @@ esp_err_t board_display_init(esp_lcd_panel_handle_t panel_handle, esp_lcd_touch_
     esp_lv_adapter_config_t cfg = ESP_LV_ADAPTER_DEFAULT_CONFIG();
     ESP_RETURN_ON_ERROR(esp_lv_adapter_init(&cfg), TAG, "failed to init LVGL adapter");
 
+#if BOARD_LCD_IS_DSI
+    esp_lv_adapter_display_config_t disp_cfg = ESP_LV_ADAPTER_DISPLAY_MIPI_DEFAULT_CONFIG(
+#else
     esp_lv_adapter_display_config_t disp_cfg = ESP_LV_ADAPTER_DISPLAY_RGB_DEFAULT_CONFIG(
+#endif
         panel_handle,
         NULL,
         BOARD_LCD_H_RES,
