@@ -172,8 +172,10 @@ esp_err_t mqtt_service_start(void)
         return ESP_ERR_INVALID_STATE;
     }
 
+    /* 用基础 MAC 做设备 ID：ESP32-P4 没有片上 Wi-Fi，读 ESP_MAC_WIFI_STA 会失败；
+     * 在 S3 上 Wi-Fi STA 的 MAC 就是基础 MAC，所以 S3 的 client id 和主题保持不变 */
     uint8_t mac[6];
-    ESP_RETURN_ON_ERROR(esp_read_mac(mac, ESP_MAC_WIFI_STA), TAG, "failed to read MAC");
+    ESP_RETURN_ON_ERROR(esp_read_mac(mac, ESP_MAC_BASE), TAG, "failed to read MAC");
 
     char id[13];
     snprintf(id, sizeof(id), "%02x%02x%02x%02x%02x%02x",
