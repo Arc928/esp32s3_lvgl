@@ -27,6 +27,7 @@ extern "C" {
  **********************/
 void ui_set_clickable(lv_obj_t *obj, bool en);
 void ui_set_scrollable(lv_obj_t *obj, bool en);
+void ui_set_hidden(lv_obj_t *obj, bool en);
 
 /* Display-only object: touches pass through to the parent, no scrolling. */
 void ui_make_static(lv_obj_t *obj);
@@ -47,6 +48,9 @@ void ui_style_status_bar(lv_obj_t *bar);
 
 /* Draws a single-color icon image (such as the Wi-Fi symbol) in the given color. */
 void ui_tint_icon(lv_obj_t *image, uint32_t color);
+
+/* Turns a status bar icon into a button: clickable, with a touch area larger than the drawn icon. */
+void ui_make_icon_button(lv_obj_t *icon, lv_event_cb_t on_click);
 
 /* Thin horizontal or vertical line. */
 lv_obj_t *ui_create_divider(lv_obj_t *parent, int32_t x, int32_t y, int32_t w, int32_t h);

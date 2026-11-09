@@ -16,11 +16,14 @@ extern "C" {
 /* Called when the user taps "返回". Swipes are handled in custom.c. */
 typedef void (*machine_view_back_cb_t)(void);
 
+/* Called when the Wi-Fi icon in the status bar is tapped. */
+typedef void (*machine_view_wifi_cb_t)(void);
+
 /*
  * Builds the page on ui->screen. Keeps the GUI Guider status bar, clock,
  * Wi-Fi icon and LED, and replaces the GUI Guider IMU panel.
  */
-void machine_view_create(lv_ui *ui, machine_view_back_cb_t on_back);
+void machine_view_create(lv_ui *ui, machine_view_back_cb_t on_back, machine_view_wifi_cb_t on_wifi);
 
 /* Shows the photo and name of a machine (index from machine_list.h). */
 void machine_view_set_machine(uint32_t machine_index);

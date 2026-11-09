@@ -15,8 +15,11 @@ extern "C" {
 /* Called with the machine index (see machine_list.h) when its photo is tapped. */
 typedef void (*gallery_select_cb_t)(uint32_t machine_index);
 
+/* Called when the Wi-Fi icon in the status bar is tapped. */
+typedef void (*gallery_wifi_cb_t)(void);
+
 /* Builds the home page on a new screen and returns that screen (not loaded). */
-lv_obj_t *gallery_view_create(gallery_select_cb_t on_select);
+lv_obj_t *gallery_view_create(gallery_select_cb_t on_select, gallery_wifi_cb_t on_wifi);
 
 /* Refreshes the clock. */
 void gallery_view_update(void);

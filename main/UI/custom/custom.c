@@ -13,6 +13,9 @@
  * Home page: the machine gallery. Tapping a machine opens its detail page
  * (BMS on the left half, other information on the right half). "返回" or a
  * swipe to the left or right goes back home.
+ *
+ * The Wi-Fi icon in the status bar of both pages opens the Wi-Fi page; "返回"
+ * there returns to the page it was opened from.
  */
 
 #include "lvgl.h"
@@ -20,12 +23,15 @@
 #include "dashboard_data.h"
 #include "gallery_view.h"
 #include "machine_view.h"
+#include "wifi_view.h"
 
 #define REFRESH_MS      500U
 #define PAGE_SWITCH_MS  200U  /* OVER_*：新页盖上来，旧页不动，每帧重绘量约为 MOVE_* 的一半 */
 
 static lv_obj_t *s_home;
 static lv_obj_t *s_detail;
+static lv_obj_t *s_wifi;
+static lv_obj_t *s_wifi_return;  /* page the Wi-Fi page was opened from */
 
 static bool page_switching(void)
 {
@@ -68,6 +74,27 @@ static void go_home(void)
     slide_home(LV_SCREEN_LOAD_ANIM_OVER_RIGHT);
 }
 
+static void open_wifi(void)
+{
+    lv_obj_t *from = lv_screen_active();
+
+    if(page_switching() || from == s_wifi) {
+        return;
+    }
+    s_wifi_return = from;
+    wifi_view_enter();
+    lv_screen_load_anim(s_wifi, LV_SCREEN_LOAD_ANIM_OVER_LEFT, PAGE_SWITCH_MS, 0, false);
+}
+
+static void close_wifi(void)
+{
+    if(page_switching() || lv_screen_active() != s_wifi) {
+        return;
+    }
+    wifi_view_leave();
+    lv_screen_load_anim(s_wifi_return, LV_SCREEN_LOAD_ANIM_OVER_RIGHT, PAGE_SWITCH_MS, 0, false);
+}
+
 /* A swipe to the left or to the right goes back home. */
 static void on_detail_gesture(lv_event_t *e)
 {
@@ -83,11 +110,12 @@ static void on_detail_gesture(lv_event_t *e)
 
 void custom_init(lv_ui *ui)
 {
-    machine_view_create(ui, go_home);
+    machine_view_create(ui, go_home, open_wifi);
     s_detail = ui->screen;
     lv_obj_add_event_cb(s_detail, on_detail_gesture, LV_EVENT_GESTURE, NULL);
 
-    s_home = gallery_view_create(open_machine);
+    s_wifi = wifi_view_create(close_wifi);
+    s_home = gallery_view_create(open_machine, open_wifi);
     lv_screen_load(s_home);
 
     refresh(NULL);

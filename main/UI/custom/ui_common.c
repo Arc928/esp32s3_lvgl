@@ -45,6 +45,20 @@ void ui_set_scrollable(lv_obj_t *obj, bool en)
 #endif
 }
 
+void ui_set_hidden(lv_obj_t *obj, bool en)
+{
+#if UI_HAS_FLAG_SETTERS
+    lv_obj_set_hidden(obj, en);
+#else
+    if(en) {
+        lv_obj_add_flag(obj, LV_OBJ_FLAG_HIDDEN);
+    }
+    else {
+        lv_obj_remove_flag(obj, LV_OBJ_FLAG_HIDDEN);
+    }
+#endif
+}
+
 void ui_make_static(lv_obj_t *obj)
 {
     ui_set_clickable(obj, false);
@@ -109,6 +123,14 @@ void ui_tint_icon(lv_obj_t *image, uint32_t color)
 {
     lv_obj_set_style_image_recolor(image, lv_color_hex(color), LV_PART_MAIN);
     lv_obj_set_style_image_recolor_opa(image, LV_OPA_COVER, LV_PART_MAIN);
+}
+
+void ui_make_icon_button(lv_obj_t *icon, lv_event_cb_t on_click)
+{
+    ui_set_clickable(icon, true);
+    /* The icon is 30 px in a 36 px bar; the extra area makes it easy to hit with a finger. */
+    lv_obj_set_ext_click_area(icon, 10);
+    lv_obj_add_event_cb(icon, on_click, LV_EVENT_CLICKED, NULL);
 }
 
 lv_obj_t *ui_create_divider(lv_obj_t *parent, int32_t x, int32_t y, int32_t w, int32_t h)

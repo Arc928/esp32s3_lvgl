@@ -33,11 +33,20 @@
  *  STATIC VARIABLES
  **********************/
 static gallery_select_cb_t s_on_select;
+static gallery_wifi_cb_t s_on_wifi;
 static lv_obj_t *s_clock;
 
 /**********************
  *   BUILD
  **********************/
+static void on_wifi_clicked(lv_event_t *e)
+{
+    LV_UNUSED(e);
+    if(s_on_wifi != NULL) {
+        s_on_wifi();
+    }
+}
+
 static void build_status_bar(lv_obj_t *screen)
 {
     lv_obj_t *bar = ui_create_box(screen);
@@ -59,6 +68,7 @@ static void build_status_bar(lv_obj_t *screen)
     lv_image_set_src(wifi, &_wifi1_RGB565A8_30x30);
     ui_tint_icon(wifi, DASH_COLOR_TEXT);
     lv_obj_align(wifi, LV_ALIGN_RIGHT_MID, -4, 0);
+    ui_make_icon_button(wifi, on_wifi_clicked);
 }
 
 static void on_card_clicked(lv_event_t *e)
@@ -105,12 +115,13 @@ static void build_card(lv_obj_t *screen, uint32_t index)
     ui_create_label(caption, DASH_FONT_BODY, DASH_COLOR_TEXT, m->name);
 }
 
-lv_obj_t *gallery_view_create(gallery_select_cb_t on_select)
+lv_obj_t *gallery_view_create(gallery_select_cb_t on_select, gallery_wifi_cb_t on_wifi)
 {
     lv_obj_t *screen = ui_create_screen();
     uint32_t i;
 
     s_on_select = on_select;
+    s_on_wifi = on_wifi;
     build_status_bar(screen);
     for(i = 0; i < MACHINE_COUNT; i++) {
         build_card(screen, i);

@@ -108,6 +108,7 @@ static const bms_data_t k_no_bms;
 static struct {
     bool created;
     machine_view_back_cb_t on_back;
+    machine_view_wifi_cb_t on_wifi;
 
     /* Status bar */
     lv_obj_t *title_number;
@@ -356,6 +357,14 @@ static void on_back_clicked(lv_event_t *e)
     }
 }
 
+static void on_wifi_clicked(lv_event_t *e)
+{
+    LV_UNUSED(e);
+    if(s_view.on_wifi != NULL) {
+        s_view.on_wifi();
+    }
+}
+
 static void build_back_button(lv_obj_t *bar)
 {
     lv_obj_t *button = ui_create_box(bar);
@@ -407,9 +416,9 @@ static void build_status_bar(lv_ui *ui)
     lv_label_set_text(s_view.clock, "--:--:--");
     lv_obj_align(s_view.clock, LV_ALIGN_RIGHT_MID, -44, 0);
 
-    ui_make_static(ui->screen_wifi);
     ui_tint_icon(ui->screen_wifi, DASH_COLOR_TEXT);
     lv_obj_align(ui->screen_wifi, LV_ALIGN_RIGHT_MID, -4, 0);
+    ui_make_icon_button(ui->screen_wifi, on_wifi_clicked);
 }
 
 /**********************
@@ -552,7 +561,7 @@ static void build_other_card(lv_obj_t *screen)
     lv_obj_align(label, LV_ALIGN_CENTER, 0, placeholder_y);
 }
 
-void machine_view_create(lv_ui *ui, machine_view_back_cb_t on_back)
+void machine_view_create(lv_ui *ui, machine_view_back_cb_t on_back, machine_view_wifi_cb_t on_wifi)
 {
     lv_obj_t *screen = ui->screen;
 
@@ -560,6 +569,7 @@ void machine_view_create(lv_ui *ui, machine_view_back_cb_t on_back)
         return;
     }
     s_view.on_back = on_back;
+    s_view.on_wifi = on_wifi;
 
     lv_obj_set_style_bg_color(screen, lv_color_hex(DASH_COLOR_BG), LV_PART_MAIN);
     ui_set_scrollable(screen, false);
