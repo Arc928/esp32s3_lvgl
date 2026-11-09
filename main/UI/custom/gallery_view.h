@@ -1,5 +1,5 @@
 /*
- * Home page: photos of the farm machines in a 3 x 3 grid (800 x 480).
+ * Home page: photos of the farm machines in a 3 x 3 grid.
  * Tapping a photo selects that machine.
  */
 

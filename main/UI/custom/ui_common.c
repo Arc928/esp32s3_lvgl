@@ -128,8 +128,8 @@ void ui_tint_icon(lv_obj_t *image, uint32_t color)
 void ui_make_icon_button(lv_obj_t *icon, lv_event_cb_t on_click)
 {
     ui_set_clickable(icon, true);
-    /* The icon is 30 px in a 36 px bar; the extra area makes it easy to hit with a finger. */
-    lv_obj_set_ext_click_area(icon, 10);
+    /* The icon is 30 px in a 36 px bar (at 800 x 480); the extra area makes it easy to hit with a finger. */
+    lv_obj_set_ext_click_area(icon, UI_SU(10));
     lv_obj_add_event_cb(icon, on_click, LV_EVENT_CLICKED, NULL);
 }
 
@@ -152,7 +152,7 @@ lv_obj_t *ui_create_row(lv_obj_t *parent, int32_t x, int32_t y, lv_flex_align_t 
     lv_obj_set_size(row, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, cross_align, cross_align);
-    lv_obj_set_style_pad_column(row, 4, LV_PART_MAIN);
+    lv_obj_set_style_pad_column(row, UI_SU(4), LV_PART_MAIN);
     return row;
 }
 

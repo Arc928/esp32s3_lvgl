@@ -1,6 +1,11 @@
 /*
- * Layout constants and widget helpers shared by the home page and the
- * machine detail page (800 x 480).
+ * Layout constants and widget helpers shared by all pages.
+ *
+ * The pages are drawn for an 800 x 480 screen and scale to the panel: sizes and
+ * positions go through UI_SX / UI_SY / UI_SU, which are the identity on 800 x 480
+ * and grow with the resolution elsewhere. The fonts come in two sets (see
+ * dashboard_theme.h) that follow the scale. The 30 px Wi-Fi icon is a bitmap of a
+ * fixed size and does not scale, so the offsets next to it are left unscaled.
  */
 
 #ifndef UI_COMMON_H
@@ -15,12 +20,32 @@ extern "C" {
 /*********************
  *      LAYOUT
  *********************/
-#define UI_SCREEN_W         800
-#define UI_SCREEN_H         480
-#define UI_STATUS_BAR_H     36
-#define UI_GAP              8
-#define UI_CARD_PAD         14
-#define UI_CARD_RADIUS      8
+/* The panel size comes from the board; a simulator can define UI_SCREEN_W / UI_SCREEN_H instead. */
+#ifndef UI_SCREEN_W
+#include "board_config.h"
+#define UI_SCREEN_W         BOARD_LCD_H_RES
+#define UI_SCREEN_H         BOARD_LCD_V_RES
+#endif
+
+/* The screen the pages were designed for. */
+#define UI_BASE_W           800
+#define UI_BASE_H           480
+
+/* A horizontal / vertical distance of the 800 x 480 design, scaled to the panel. */
+#define UI_SX(v)            ((int32_t)((v) * UI_SCREEN_W / UI_BASE_W))
+#define UI_SY(v)            ((int32_t)((v) * UI_SCREEN_H / UI_BASE_H))
+/* A size that must keep its shape (circles, paddings, radii): the smaller of the two scale factors. */
+#define UI_SU(v)            ((UI_SCREEN_W * UI_BASE_H <= UI_SCREEN_H * UI_BASE_W) ? UI_SX(v) : UI_SY(v))
+/* LVGL image zoom for photos drawn for the 800 x 480 design (256 = 1x). */
+#define UI_IMG_SCALE        UI_SU(256)
+/* The scale in percent as a plain constant (100 on 800 x 480), usable in #if; dashboard_theme.h picks the fonts by it. */
+#define UI_SCALE_PCT        ((UI_SCREEN_W * 100 / UI_BASE_W) < (UI_SCREEN_H * 100 / UI_BASE_H) ? \
+                             (UI_SCREEN_W * 100 / UI_BASE_W) : (UI_SCREEN_H * 100 / UI_BASE_H))
+
+#define UI_STATUS_BAR_H     UI_SY(36)
+#define UI_GAP              UI_SU(8)
+#define UI_CARD_PAD         UI_SU(14)
+#define UI_CARD_RADIUS      UI_SU(8)
 
 /**********************
  *   WIDGETS

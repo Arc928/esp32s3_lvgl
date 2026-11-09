@@ -1,5 +1,5 @@
 /*
- * Machine detail page (800 x 480): BMS on the left half, other machine
+ * Machine detail page: BMS on the left half, other machine
  * information on the right half.
  */
 

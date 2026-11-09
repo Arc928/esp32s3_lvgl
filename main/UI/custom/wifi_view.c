@@ -1,5 +1,5 @@
 /*
- * Wi-Fi page (800 x 480).
+ * Wi-Fi page.
  *
  *  +-- ‹ 返回 ----------------- Wi-Fi ------------------- Scan --+
  *  | Connected    MyHome                          [Disconnect]  |
@@ -60,29 +60,33 @@
 /*********************
  *      LAYOUT
  *********************/
-#define BACK_W              84
-#define SCAN_W              104
-#define BAR_BTN_H           26
-#define STATUS_CARD_H       52
+#define BACK_W              UI_SU(84)
+#define SCAN_W              UI_SU(104)
+#define BAR_BTN_H           UI_SY(26)
+#define STATUS_CARD_H       UI_SY(52)
 #define LIST_Y              (UI_GAP + STATUS_CARD_H + UI_GAP)
 #define LIST_H              (UI_SCREEN_H - UI_STATUS_BAR_H - LIST_Y)
-#define ROW_H               52
-#define ROW_PAD             14
+#define ROW_H               UI_SY(52)
+#define ROW_PAD             UI_SU(14)
 
-#define KB_H                232
+#define KB_H                UI_SY(232)
 #define SHEET_H             (UI_SCREEN_H - UI_STATUS_BAR_H - KB_H)
-#define SHEET_PAD           24
-#define EYE_W               48
-#define FIELD_H             44
+#define SHEET_PAD           UI_SU(24)
+#define EYE_W               UI_SU(48)
+#define FIELD_H             UI_SY(44)
+#define SHEET_BTN_W         UI_SU(120)
+#define SHEET_BTN_H         UI_SU(40)
+#define SHEET_BTN_GAP       UI_SU(12)
+#define SHEET_BTN_BOTTOM    UI_SU(14)
 
 #define SIGNAL_BARS         4
-#define SIGNAL_BAR_W        4
-#define SIGNAL_BAR_GAP      2
+#define SIGNAL_BAR_W        UI_SU(4)
+#define SIGNAL_BAR_GAP      UI_SU(2)
 #define SIGNAL_W            (SIGNAL_BARS * SIGNAL_BAR_W + (SIGNAL_BARS - 1) * SIGNAL_BAR_GAP)
-#define SIGNAL_H            16
-#define NAME_W              460
-#define CAPTION_W           160
-#define CAPTION_GAP         14
+#define SIGNAL_H            UI_SU(16)
+#define NAME_W              UI_SX(460)
+#define CAPTION_W           UI_SX(160)
+#define CAPTION_GAP         UI_SU(14)
 
 #define TICK_MS             250U
 
@@ -151,7 +155,7 @@ static lv_obj_t *create_button(lv_obj_t *parent, int32_t w, int32_t h, bool prim
     lv_obj_set_style_bg_opa(button, primary ? LV_OPA_COVER : LV_OPA_TRANSP, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(button, primary ? LV_OPA_70 : LV_OPA_COVER, LV_PART_MAIN | LV_STATE_PRESSED);
     ui_set_clickable(button, true);
-    lv_obj_set_ext_click_area(button, 6);
+    lv_obj_set_ext_click_area(button, UI_SU(6));
     lv_obj_add_event_cb(button, on_click, LV_EVENT_CLICKED, NULL);
 
     label = ui_create_label(button, font, primary ? 0xFFFFFF : DASH_COLOR_TEXT, text);
@@ -285,7 +289,7 @@ static void on_row_draw(lv_event_t *e)
         area.x1 = box.x2 - ROW_PAD - SIGNAL_W + i * (SIGNAL_BAR_W + SIGNAL_BAR_GAP);
         area.x2 = area.x1 + SIGNAL_BAR_W - 1;
         area.y2 = base_y - 1;
-        area.y1 = base_y - (4 + i * 4);
+        area.y1 = base_y - UI_SU(4 + i * 4);
         lv_draw_rect(layer, &bar, &area);
     }
 }
@@ -314,7 +318,7 @@ static void rebuild_list(bool keep_scroll)
         const char *text = s.scanning ? STR_SCANNING : (s.hint != NULL ? s.hint : STR_NO_NETWORKS);
         lv_obj_t *label = ui_create_label(s.list, DASH_FONT_BODY, DASH_COLOR_MUTED, text);
 
-        lv_obj_set_style_pad_top(label, 40, LV_PART_MAIN);
+        lv_obj_set_style_pad_top(label, UI_SY(40), LV_PART_MAIN);
         lv_obj_set_width(label, LV_PCT(100));
         lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
         return;
@@ -658,11 +662,11 @@ static void build_list_page(lv_obj_t *screen)
     lv_obj_align(s.status_state, LV_ALIGN_LEFT_MID, ROW_PAD, 0);
 
     s.status_detail = ui_create_label(card, DASH_FONT_BODY, DASH_COLOR_TEXT, "");
-    lv_obj_set_width(s.status_detail, 400);
+    lv_obj_set_width(s.status_detail, UI_SX(400));
     lv_label_set_long_mode(s.status_detail, LV_LABEL_LONG_MODE_DOTS);
-    lv_obj_align(s.status_detail, LV_ALIGN_LEFT_MID, 170, 0);
+    lv_obj_align(s.status_detail, LV_ALIGN_LEFT_MID, UI_SX(170), 0);
 
-    s.status_button = create_button(card, 112, 30, false, DASH_FONT_BODY, STR_DISCONNECT, on_status_button_clicked);
+    s.status_button = create_button(card, UI_SU(112), UI_SU(30), false, DASH_FONT_BODY, STR_DISCONNECT, on_status_button_clicked);
     lv_obj_align(s.status_button, LV_ALIGN_RIGHT_MID, -ROW_PAD, 0);
     s.status_button_label = button_label(s.status_button);
     ui_set_hidden(s.status_button, true);
@@ -680,8 +684,8 @@ static void build_list_page(lv_obj_t *screen)
     lv_obj_set_style_pad_right(s.list, UI_GAP, LV_PART_MAIN);
     lv_obj_set_style_pad_bottom(s.list, UI_GAP, LV_PART_MAIN);
     lv_obj_set_style_pad_row(s.list, UI_GAP, LV_PART_MAIN);
-    lv_obj_set_style_width(s.list, 4, LV_PART_SCROLLBAR);
-    lv_obj_set_style_radius(s.list, 2, LV_PART_SCROLLBAR);
+    lv_obj_set_style_width(s.list, UI_SU(4), LV_PART_SCROLLBAR);
+    lv_obj_set_style_radius(s.list, UI_SU(2), LV_PART_SCROLLBAR);
     lv_obj_set_style_bg_color(s.list, lv_color_hex(DASH_COLOR_MUTED), LV_PART_SCROLLBAR);
     lv_obj_set_style_bg_opa(s.list, LV_OPA_60, LV_PART_SCROLLBAR);
 }
@@ -698,12 +702,12 @@ static void build_keyboard(lv_obj_t *screen)
     lv_obj_set_style_border_width(kb, 0, LV_PART_MAIN);
     lv_obj_set_style_bg_color(kb, lv_color_hex(DASH_COLOR_BG), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(kb, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_pad_left(kb, 6, LV_PART_MAIN);
-    lv_obj_set_style_pad_right(kb, 6, LV_PART_MAIN);
-    lv_obj_set_style_pad_top(kb, 6, LV_PART_MAIN);
-    lv_obj_set_style_pad_bottom(kb, 6, LV_PART_MAIN);
-    lv_obj_set_style_pad_row(kb, 6, LV_PART_MAIN);
-    lv_obj_set_style_pad_column(kb, 6, LV_PART_MAIN);
+    lv_obj_set_style_pad_left(kb, UI_SU(6), LV_PART_MAIN);
+    lv_obj_set_style_pad_right(kb, UI_SU(6), LV_PART_MAIN);
+    lv_obj_set_style_pad_top(kb, UI_SU(6), LV_PART_MAIN);
+    lv_obj_set_style_pad_bottom(kb, UI_SU(6), LV_PART_MAIN);
+    lv_obj_set_style_pad_row(kb, UI_SU(6), LV_PART_MAIN);
+    lv_obj_set_style_pad_column(kb, UI_SU(6), LV_PART_MAIN);
 
     lv_obj_set_style_text_font(kb, INPUT_FONT, LV_PART_ITEMS);
     lv_obj_set_style_text_color(kb, lv_color_hex(DASH_COLOR_TEXT), LV_PART_ITEMS);
@@ -711,7 +715,7 @@ static void build_keyboard(lv_obj_t *screen)
     lv_obj_set_style_bg_opa(kb, LV_OPA_COVER, LV_PART_ITEMS);
     lv_obj_set_style_border_color(kb, lv_color_hex(DASH_COLOR_BORDER), LV_PART_ITEMS);
     lv_obj_set_style_border_width(kb, 1, LV_PART_ITEMS);
-    lv_obj_set_style_radius(kb, 6, LV_PART_ITEMS);
+    lv_obj_set_style_radius(kb, UI_SU(6), LV_PART_ITEMS);
     lv_obj_set_style_shadow_width(kb, 0, LV_PART_ITEMS);
     lv_obj_set_style_bg_color(kb, lv_color_hex(DASH_COLOR_PRESSED), LV_PART_ITEMS | LV_STATE_PRESSED);
     /* Shift / caps lock and the mode keys when active. */
@@ -739,8 +743,8 @@ static void build_textarea(void)
     lv_obj_set_style_border_color(ta, lv_color_hex(DASH_COLOR_ACCENT), LV_PART_MAIN | LV_STATE_FOCUSED);
     lv_obj_set_style_radius(ta, UI_CARD_RADIUS, LV_PART_MAIN);
     lv_obj_set_style_shadow_width(ta, 0, LV_PART_MAIN);
-    lv_obj_set_style_pad_left(ta, 12, LV_PART_MAIN);
-    lv_obj_set_style_pad_right(ta, 12, LV_PART_MAIN);
+    lv_obj_set_style_pad_left(ta, UI_SU(12), LV_PART_MAIN);
+    lv_obj_set_style_pad_right(ta, UI_SU(12), LV_PART_MAIN);
     lv_obj_set_style_pad_top(ta, pad_y, LV_PART_MAIN);
     lv_obj_set_style_pad_bottom(ta, pad_y, LV_PART_MAIN);
     lv_obj_set_style_text_color(ta, lv_color_hex(DASH_COLOR_MUTED), LV_PART_TEXTAREA_PLACEHOLDER);
@@ -753,7 +757,7 @@ static void build_textarea(void)
     lv_textarea_set_placeholder_text(ta, STR_PASSWORD);
     lv_textarea_set_password_mode(ta, true);
 
-    lv_obj_set_pos(ta, SHEET_PAD, 50);
+    lv_obj_set_pos(ta, SHEET_PAD, UI_SY(50));
     lv_obj_set_size(ta, UI_SCREEN_W - 2 * SHEET_PAD - EYE_W - UI_GAP, FIELD_H);
 }
 
@@ -768,14 +772,14 @@ static void build_sheet(lv_obj_t *screen)
     s.sheet_title = ui_create_label(s.sheet, DASH_FONT_VALUE, DASH_COLOR_TEXT, "");
     lv_obj_set_width(s.sheet_title, UI_SCREEN_W - 2 * SHEET_PAD);
     lv_label_set_long_mode(s.sheet_title, LV_LABEL_LONG_MODE_DOTS);
-    lv_obj_set_pos(s.sheet_title, SHEET_PAD, 12);
+    lv_obj_set_pos(s.sheet_title, SHEET_PAD, UI_SU(12));
 
     build_textarea();
 
     /* Show / hide the password */
     button = ui_create_box(s.sheet);
     lv_obj_set_size(button, EYE_W, FIELD_H);
-    lv_obj_set_pos(button, UI_SCREEN_W - SHEET_PAD - EYE_W, 50);
+    lv_obj_set_pos(button, UI_SCREEN_W - SHEET_PAD - EYE_W, UI_SY(50));
     ui_style_card(button);
     lv_obj_set_style_bg_color(button, lv_color_hex(DASH_COLOR_PRESSED), LV_PART_MAIN | LV_STATE_PRESSED);
     ui_set_clickable(button, true);
@@ -786,12 +790,15 @@ static void build_sheet(lv_obj_t *screen)
     s.message = ui_create_label(s.sheet, DASH_FONT_SMALL, DASH_COLOR_MUTED, "");
     lv_obj_set_width(s.message, UI_SCREEN_W - 2 * SHEET_PAD);
     lv_label_set_long_mode(s.message, LV_LABEL_LONG_MODE_DOTS);
-    lv_obj_set_pos(s.message, SHEET_PAD, 102);
+    lv_obj_set_pos(s.message, SHEET_PAD, UI_SY(102));
 
-    button = create_button(s.sheet, 120, 40, true, DASH_FONT_BODY, STR_CONNECT, on_sheet_connect_clicked);
-    lv_obj_set_pos(button, UI_SCREEN_W - SHEET_PAD - 120, SHEET_H - 40 - 14);
-    button = create_button(s.sheet, 120, 40, false, DASH_FONT_BODY, STR_CANCEL, on_sheet_cancel_clicked);
-    lv_obj_set_pos(button, UI_SCREEN_W - SHEET_PAD - 120 - 12 - 120, SHEET_H - 40 - 14);
+    button = create_button(s.sheet, SHEET_BTN_W, SHEET_BTN_H, true, DASH_FONT_BODY, STR_CONNECT,
+                           on_sheet_connect_clicked);
+    lv_obj_set_pos(button, UI_SCREEN_W - SHEET_PAD - SHEET_BTN_W, SHEET_H - SHEET_BTN_H - SHEET_BTN_BOTTOM);
+    button = create_button(s.sheet, SHEET_BTN_W, SHEET_BTN_H, false, DASH_FONT_BODY, STR_CANCEL,
+                           on_sheet_cancel_clicked);
+    lv_obj_set_pos(button, UI_SCREEN_W - SHEET_PAD - SHEET_BTN_W - SHEET_BTN_GAP - SHEET_BTN_W,
+                   SHEET_H - SHEET_BTN_H - SHEET_BTN_BOTTOM);
 
     ui_set_hidden(s.sheet, true);
 }

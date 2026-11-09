@@ -1,5 +1,5 @@
 /*
- * Machine detail page (800 x 480).
+ * Machine detail page.
  *
  *  +-- ‹ 返回 ------------- 03  覆膜机 ------------- clock  wifi --+
  *  | BMS: SOC ring, pack metrics    | Machine photo and name        |
@@ -23,7 +23,7 @@
  *      LAYOUT
  *********************/
 #define CARD_PAD        UI_CARD_PAD
-#define TITLE_Y         10
+#define TITLE_Y         UI_SU(10)
 
 #define HALF_W          ((UI_SCREEN_W - 3 * UI_GAP) / 2)
 #define LEFT_X          UI_GAP
@@ -32,9 +32,9 @@
 #define BODY_BOTTOM     (UI_SCREEN_H - UI_GAP)
 
 /* Left half: BMS */
-#define PACK_H          184
+#define PACK_H          UI_SY(184)
 #define CELLS_Y         (BODY_Y + PACK_H + UI_GAP)
-#define CELLS_H         128
+#define CELLS_H         UI_SY(128)
 #define RELAY_Y         (CELLS_Y + CELLS_H + UI_GAP)
 #define RELAY_H         (BODY_BOTTOM - RELAY_Y)
 
@@ -44,24 +44,24 @@
 #define OTHER_H         (BODY_BOTTOM - OTHER_Y)
 
 /* Pack card: SOC ring on the left, 3 x 2 metrics on the right. */
-#define SOC_SIZE        140
-#define SOC_ARC_W       10
-#define METRIC_X        (CARD_PAD + SOC_SIZE + 20)
+#define SOC_SIZE        UI_SU(140)
+#define SOC_ARC_W       UI_SU(10)
+#define METRIC_X        (CARD_PAD + SOC_SIZE + UI_SU(20))
 #define METRIC_COL_W    ((HALF_W - CARD_PAD - METRIC_X) / 2)
-#define METRIC_Y        34
-#define METRIC_ROW_H    48
+#define METRIC_Y        UI_SY(34)
+#define METRIC_ROW_H    UI_SY(48)
 
 /* Cells card: two columns split by a vertical line. */
 #define SPLIT_X         (HALF_W / 2)
 #define SPLIT_COL_W     (SPLIT_X - 2 * CARD_PAD)
 
 /* Relay card */
-#define RELAY_SLOT_W    60
-#define FIELD_W         120
+#define RELAY_SLOT_W    UI_SX(60)
+#define FIELD_W         UI_SX(120)
 
 /* Back button in the status bar */
-#define BACK_W          84
-#define BACK_H          26
+#define BACK_W          UI_SU(84)
+#define BACK_H          UI_SY(26)
 
 /**********************
  *      TYPEDEFS
@@ -176,7 +176,7 @@ static metric_t create_stacked_metric(lv_obj_t *parent, int32_t x, int32_t y, co
     lv_obj_t *label = ui_create_label(parent, DASH_FONT_SMALL, DASH_COLOR_MUTED, caption);
 
     lv_obj_set_pos(label, x, y);
-    row = ui_create_row(parent, x, y + 20, LV_FLEX_ALIGN_END);
+    row = ui_create_row(parent, x, y + UI_SU(20), LV_FLEX_ALIGN_END);
     m.value = ui_create_label(row, DASH_FONT_VALUE, DASH_COLOR_TEXT, "--");
     m.unit = ui_create_label(row, DASH_FONT_SMALL, DASH_COLOR_MUTED, unit);
     ui_match_baseline(m.unit, DASH_FONT_SMALL, DASH_FONT_VALUE);
@@ -206,7 +206,7 @@ static lv_obj_t *create_field(lv_obj_t *parent, int32_t x, int32_t y, const char
     lv_obj_t *label = ui_create_label(row, DASH_FONT_SMALL, DASH_COLOR_MUTED, caption);
     lv_obj_t *value;
 
-    lv_obj_set_style_pad_column(row, 8, LV_PART_MAIN);
+    lv_obj_set_style_pad_column(row, UI_SU(8), LV_PART_MAIN);
     ui_match_baseline(label, DASH_FONT_SMALL, DASH_FONT_BODY);
     value = ui_create_label(row, DASH_FONT_BODY, DASH_COLOR_TEXT, "--");
     return value;
@@ -222,7 +222,7 @@ static lamp_t create_lamp(lv_obj_t *parent, lv_obj_t *led, const lv_font_t *font
     else {
         lv_obj_set_parent(led, parent);
     }
-    lv_obj_set_size(led, 10, 10);
+    lv_obj_set_size(led, UI_SU(10), UI_SU(10));
     lv_led_on(led);
     /* Flat dot: the theme default gives every LED a blurry glow. */
     lv_obj_set_style_shadow_width(led, 0, LV_PART_MAIN);
@@ -381,11 +381,11 @@ static void build_back_button(lv_obj_t *bar)
     lv_obj_set_style_bg_opa(button, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_PRESSED);
     ui_set_clickable(button, true);
     /* Easier to hit with a finger than the drawn button. */
-    lv_obj_set_ext_click_area(button, 6);
+    lv_obj_set_ext_click_area(button, UI_SU(6));
     lv_obj_add_event_cb(button, on_back_clicked, LV_EVENT_CLICKED, NULL);
 
     row = ui_create_row(button, 0, 0, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_column(row, 6, LV_PART_MAIN);
+    lv_obj_set_style_pad_column(row, UI_SU(6), LV_PART_MAIN);
     lv_obj_center(row);
     ui_create_label(row, DASH_FONT_SMALL, DASH_COLOR_TEXT, LV_SYMBOL_LEFT);
     ui_create_label(row, DASH_FONT_BODY, DASH_COLOR_TEXT, "返回");
@@ -403,7 +403,7 @@ static void build_status_bar(lv_ui *ui)
 
     /* "03  覆膜机", filled in by machine_view_set_machine(). */
     title = ui_create_row(bar, 0, 0, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_column(title, 8, LV_PART_MAIN);
+    lv_obj_set_style_pad_column(title, UI_SU(8), LV_PART_MAIN);
     lv_obj_align(title, LV_ALIGN_CENTER, 0, 0);
     s_view.title_number = ui_create_label(title, DASH_FONT_SMALL, DASH_COLOR_ACCENT, "--");
     s_view.title_name = ui_create_label(title, DASH_FONT_BODY, DASH_COLOR_TEXT, "--");
@@ -436,10 +436,10 @@ static void build_pack_card(lv_ui *ui)
 
     /* Title row, right side: "● CAN 在线   ✓ 正常". Reuses the GUI Guider LED. */
     status = ui_create_row(card, 0, 0, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_column(status, 6, LV_PART_MAIN);
+    lv_obj_set_style_pad_column(status, UI_SU(6), LV_PART_MAIN);
     s_view.can = create_lamp(status, ui->screen_led_1, DASH_FONT_SMALL, "CAN 离线");
     spacer = ui_create_box(status);
-    lv_obj_set_size(spacer, 6, 1);
+    lv_obj_set_size(spacer, UI_SU(6), 1);
     s_view.health = ui_create_label(status, DASH_FONT_SMALL, DASH_COLOR_MUTED, "--");
     lv_obj_align(status, LV_ALIGN_TOP_RIGHT, -CARD_PAD, TITLE_Y + 2);
 
@@ -448,7 +448,7 @@ static void build_pack_card(lv_ui *ui)
     lv_obj_remove_style(arc, NULL, LV_PART_KNOB);
     ui_make_static(arc);
     lv_obj_set_size(arc, SOC_SIZE, SOC_SIZE);
-    lv_obj_set_pos(arc, CARD_PAD, 36);
+    lv_obj_set_pos(arc, CARD_PAD, UI_SY(36));
     lv_arc_set_bg_angles(arc, 135, 45);
     lv_arc_set_range(arc, 0, 1000);
     lv_arc_set_value(arc, 0);
@@ -460,13 +460,13 @@ static void build_pack_card(lv_ui *ui)
     s_view.soc_color = DASH_COLOR_OFF;
 
     row = ui_create_row(arc, 0, 0, LV_FLEX_ALIGN_END);
-    lv_obj_align(row, LV_ALIGN_CENTER, 0, -8);
+    lv_obj_align(row, LV_ALIGN_CENTER, 0, UI_SU(-8));
     s_view.soc_value = ui_create_label(row, DASH_FONT_HERO, DASH_COLOR_TEXT, "--");
     percent = ui_create_label(row, DASH_FONT_BODY, DASH_COLOR_MUTED, "%");
     ui_match_baseline(percent, DASH_FONT_BODY, DASH_FONT_HERO);
 
     s_view.soc_state = ui_create_label(arc, DASH_FONT_SMALL, DASH_COLOR_MUTED, "SOC");
-    lv_obj_align(s_view.soc_state, LV_ALIGN_CENTER, 0, 28);
+    lv_obj_align(s_view.soc_state, LV_ALIGN_CENTER, 0, UI_SU(28));
 
     /* Metrics, 3 rows x 2 columns */
     s_view.voltage = create_stacked_metric(card, METRIC_X, METRIC_Y, "总电压", "V");
@@ -480,7 +480,7 @@ static void build_pack_card(lv_ui *ui)
 static void build_extremes(lv_obj_t *card, int32_t x, const char *title, const char *unit,
                            const char *delta_caption, const char *delta_unit, extremes_t *out)
 {
-    static const int32_t row_y[] = {34, 64, 94};
+    static const int32_t row_y[] = {UI_SY(34), UI_SY(64), UI_SY(94)};
     /* TOP_RIGHT offset that puts the right edge at the end of this column. */
     int32_t right_ofs = x + SPLIT_COL_W - HALF_W;
     /* Lines up the small position text with the value baseline. */
@@ -489,9 +489,9 @@ static void build_extremes(lv_obj_t *card, int32_t x, const char *title, const c
     lv_obj_t *label = ui_create_label(card, DASH_FONT_BODY, DASH_COLOR_TEXT, title);
 
     lv_obj_set_pos(label, x, TITLE_Y);
-    out->max = create_inline_metric(card, x, row_y[0], "最高", 36, DASH_FONT_VALUE, unit);
-    out->min = create_inline_metric(card, x, row_y[1], "最低", 36, DASH_FONT_VALUE, unit);
-    out->delta = create_inline_metric(card, x, row_y[2], delta_caption, 36, DASH_FONT_VALUE, delta_unit);
+    out->max = create_inline_metric(card, x, row_y[0], "最高", UI_SU(36), DASH_FONT_VALUE, unit);
+    out->min = create_inline_metric(card, x, row_y[1], "最低", UI_SU(36), DASH_FONT_VALUE, unit);
+    out->delta = create_inline_metric(card, x, row_y[2], delta_caption, UI_SU(36), DASH_FONT_VALUE, delta_unit);
 
     out->max_pos = ui_create_label(card, DASH_FONT_SMALL, DASH_COLOR_MUTED, "--");
     lv_obj_align(out->max_pos, LV_ALIGN_TOP_RIGHT, right_ofs, row_y[0] + pos_dy);
@@ -504,7 +504,7 @@ static void build_cells_card(lv_obj_t *screen)
     lv_obj_t *card = create_card(screen, LEFT_X, CELLS_Y, HALF_W, CELLS_H, NULL);
 
     build_extremes(card, CARD_PAD, "电芯电压", "V", "压差", "mV", &s_view.cells);
-    ui_create_divider(card, SPLIT_X, 12, 1, CELLS_H - 24);
+    ui_create_divider(card, SPLIT_X, UI_SU(12), 1, CELLS_H - 2 * UI_SU(12));
     build_extremes(card, SPLIT_X + CARD_PAD, "温度", "°C", "温差", "°C", &s_view.temps);
 }
 
@@ -515,15 +515,15 @@ static void build_relay_card(lv_obj_t *screen)
 
     for(i = 0; i < RELAY_COUNT; i++) {
         int32_t x = CARD_PAD + (int32_t)i * RELAY_SLOT_W;
-        lv_obj_t *row = ui_create_row(card, x, 36, LV_FLEX_ALIGN_CENTER);
+        lv_obj_t *row = ui_create_row(card, x, UI_SY(36), LV_FLEX_ALIGN_CENTER);
 
-        lv_obj_set_style_pad_column(row, 8, LV_PART_MAIN);
+        lv_obj_set_style_pad_column(row, UI_SU(8), LV_PART_MAIN);
         s_view.relays[i] = create_lamp(row, NULL, DASH_FONT_BODY, k_relay_names[i]);
     }
 
-    s_view.alarm_state = create_field(card, CARD_PAD, 68, "告警");
-    s_view.fault_code = create_field(card, CARD_PAD + FIELD_W, 68, "故障码");
-    s_view.update_age = create_field(card, CARD_PAD + 2 * FIELD_W, 68, "更新");
+    s_view.alarm_state = create_field(card, CARD_PAD, UI_SY(68), "告警");
+    s_view.fault_code = create_field(card, CARD_PAD + FIELD_W, UI_SY(68), "故障码");
+    s_view.update_age = create_field(card, CARD_PAD + 2 * FIELD_W, UI_SY(68), "更新");
 }
 
 /**********************
@@ -533,11 +533,12 @@ static void build_machine_card(lv_obj_t *screen)
 {
     lv_obj_t *card = create_card(screen, RIGHT_X, BODY_Y, HALF_W, MACHINE_H, "设备");
 
+    /* Position and zoom are set in machine_view_set_machine(), the photos differ in height. */
     s_view.machine_image = lv_image_create(card);
-    lv_obj_align(s_view.machine_image, LV_ALIGN_TOP_MID, 0, 30);
+    lv_image_set_scale(s_view.machine_image, UI_IMG_SCALE);
 
     s_view.machine_name = ui_create_label(card, DASH_FONT_VALUE, DASH_COLOR_TEXT, "--");
-    lv_obj_align(s_view.machine_name, LV_ALIGN_TOP_MID, 0, 142);
+    lv_obj_align(s_view.machine_name, LV_ALIGN_TOP_MID, 0, UI_SY(142));
 }
 
 static void build_other_card(lv_obj_t *screen)
@@ -549,14 +550,14 @@ static void build_other_card(lv_obj_t *screen)
     label = ui_create_label(card, DASH_FONT_SMALL, DASH_COLOR_MUTED, "姿态 IMU");
     lv_obj_align(label, LV_ALIGN_TOP_RIGHT, -CARD_PAD, TITLE_Y + 2);
 
-    s_view.pitch = create_stacked_metric(card, CARD_PAD, 36, "俯仰", "°");
-    s_view.roll = create_stacked_metric(card, CARD_PAD + FIELD_W, 36, "横滚", "°");
-    s_view.yaw = create_stacked_metric(card, CARD_PAD + 2 * FIELD_W, 36, "偏航", "°");
+    s_view.pitch = create_stacked_metric(card, CARD_PAD, UI_SY(36), "俯仰", "°");
+    s_view.roll = create_stacked_metric(card, CARD_PAD + FIELD_W, UI_SY(36), "横滚", "°");
+    s_view.yaw = create_stacked_metric(card, CARD_PAD + 2 * FIELD_W, UI_SY(36), "偏航", "°");
 
-    ui_create_divider(card, CARD_PAD, 96, HALF_W - 2 * CARD_PAD, 1);
+    ui_create_divider(card, CARD_PAD, UI_SY(96), HALF_W - 2 * CARD_PAD, 1);
 
     /* Space reserved for the information that will be added later. */
-    placeholder_y = 96 + (OTHER_H - 96) / 2 - OTHER_H / 2;
+    placeholder_y = UI_SY(96) + (OTHER_H - UI_SY(96)) / 2 - OTHER_H / 2;
     label = ui_create_label(card, DASH_FONT_BODY, DASH_COLOR_MUTED, "更多信息待提供");
     lv_obj_align(label, LV_ALIGN_CENTER, 0, placeholder_y);
 }
@@ -571,6 +572,8 @@ void machine_view_create(lv_ui *ui, machine_view_back_cb_t on_back, machine_view
     s_view.on_back = on_back;
     s_view.on_wifi = on_wifi;
 
+    /* GUI Guider drew this screen at 800 x 480. */
+    lv_obj_set_size(screen, UI_SCREEN_W, UI_SCREEN_H);
     lv_obj_set_style_bg_color(screen, lv_color_hex(DASH_COLOR_BG), LV_PART_MAIN);
     ui_set_scrollable(screen, false);
     remove_guider_imu_panel(ui);
@@ -599,6 +602,14 @@ void machine_view_set_machine(uint32_t machine_index)
     ui_set_text(s_view.title_name, m->name);
     ui_set_text(s_view.machine_name, m->name);
     lv_image_set_src(s_view.machine_image, m->image);
+    /* The photo is zoomed around its center; move it down by the growth of its half height so the
+     * top edge stays at the designed place. */
+    {
+        int32_t h = (int32_t)m->image->header.h;
+
+        lv_obj_align(s_view.machine_image, LV_ALIGN_TOP_MID, 0,
+                     UI_SY(30) + (h * UI_IMG_SCALE / 256 - h) / 2);
+    }
 }
 
 /**********************

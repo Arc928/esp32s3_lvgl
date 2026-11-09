@@ -1,5 +1,5 @@
 /*
- * Home page: farm machine gallery (800 x 480).
+ * Home page: farm machine gallery.
  *
  *  +-- hint ---------------- 农机设备 ------------ clock  wifi --+
  *  | photo 1          | photo 2          | photo 3            |
@@ -24,10 +24,10 @@
 #define CELL_W          ((UI_SCREEN_W - (COLS + 1) * UI_GAP) / COLS)
 #define CELL_H          ((UI_SCREEN_H - UI_STATUS_BAR_H - (ROWS + 1) * UI_GAP) / ROWS)
 
-/* Must match BOX_W / BOX_H in tools/gen_images.sh. */
-#define IMG_BOX_H       106
-#define IMG_TOP         3
-#define CAPTION_BOTTOM  5
+/* IMG_BOX_H must match BOX_H in tools/gen_images.sh (800 x 480); the photos are zoomed by UI_IMG_SCALE. */
+#define IMG_BOX_H       UI_SU(106)
+#define IMG_TOP         UI_SU(3)
+#define CAPTION_BOTTOM  UI_SU(5)
 
 /**********************
  *  STATIC VARIABLES
@@ -56,7 +56,7 @@ static void build_status_bar(lv_obj_t *screen)
     ui_style_status_bar(bar);
 
     label = ui_create_label(bar, DASH_FONT_SMALL, DASH_COLOR_MUTED, "点击农机查看详情");
-    lv_obj_align(label, LV_ALIGN_LEFT_MID, 12, 0);
+    lv_obj_align(label, LV_ALIGN_LEFT_MID, UI_SU(12), 0);
 
     label = ui_create_label(bar, DASH_FONT_BODY, DASH_COLOR_TEXT, "农机设备");
     lv_obj_align(label, LV_ALIGN_CENTER, 0, 0);
@@ -100,14 +100,16 @@ static void build_card(lv_obj_t *screen, uint32_t index)
     lv_obj_set_style_border_color(card, lv_color_hex(DASH_COLOR_ACCENT), LV_PART_MAIN | LV_STATE_PRESSED);
     lv_obj_add_event_cb(card, on_card_clicked, LV_EVENT_CLICKED, (void *)(uintptr_t)index);
 
-    /* Center the photo inside its box; the box sits at the top of the card. */
+    /* Center the photo inside its box; the box sits at the top of the card. The photo is zoomed
+     * around its center, so the offset below works with the unzoomed height. */
     image = lv_image_create(card);
     lv_image_set_src(image, m->image);
+    lv_image_set_scale(image, UI_IMG_SCALE);
     lv_obj_align(image, LV_ALIGN_TOP_MID, 0, IMG_TOP + (IMG_BOX_H - (int32_t)m->image->header.h) / 2);
 
     /* "01  旋耕起垄机" */
     caption = ui_create_row(card, 0, 0, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_column(caption, 8, LV_PART_MAIN);
+    lv_obj_set_style_pad_column(caption, UI_SU(8), LV_PART_MAIN);
     lv_obj_align(caption, LV_ALIGN_BOTTOM_MID, 0, -CAPTION_BOTTOM);
 
     lv_snprintf(number, sizeof(number), "%02u", (unsigned)(index + 1U));

@@ -1,6 +1,6 @@
 /*
  * Wi-Fi page: scans nearby networks and connects to the one the user picks,
- * asking for the password on an on-screen keyboard (800 x 480).
+ * asking for the password on an on-screen keyboard.
  *
  * Opened from the Wi-Fi icon in the status bar of the other pages. The data
  * comes from net_service; this file only draws and calls it.
