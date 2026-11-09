@@ -13,6 +13,7 @@
 
 #define BOARD_LCD_IS_DSI                1
 #define BOARD_HAS_EXIO                  0
+#define BOARD_UI_PUSH_TRANSITION        1       /* 页面切换用平移动画：新旧两页一起滑动 */
 
 /* ==================== LCD：1024x600 MIPI DSI，RGB565 ==================== */
 #define BOARD_LCD_H_RES                 1024

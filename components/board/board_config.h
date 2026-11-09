@@ -12,6 +12,7 @@
  *   BOARD_I2C_*                 I2C 总线
  *   BOARD_HAS_EXIO              1=屏幕复位、背光、触摸复位接在 CH422G 上
  *   BOARD_TOUCH_*               触摸的 I2C 速率和坐标镜像
+ *   BOARD_UI_PUSH_TRANSITION    1=页面切换时新旧两页一起平移；0=新页盖在旧页上（界面层用，见 ui_common.h）
  */
 
 #pragma once

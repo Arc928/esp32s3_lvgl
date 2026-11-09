@@ -9,6 +9,7 @@
 
 #define BOARD_LCD_IS_DSI                0
 #define BOARD_HAS_EXIO                  1
+#define BOARD_UI_PUSH_TRANSITION        0       /* 页面切换用覆盖动画：新页盖上来，每帧只重绘一半画面 */
 
 /* ==================== LCD：800x480 RGB565 16 位并口屏 ==================== */
 #define BOARD_LCD_H_RES                 800

@@ -42,6 +42,20 @@ extern "C" {
 #define UI_SCALE_PCT        ((UI_SCREEN_W * 100 / UI_BASE_W) < (UI_SCREEN_H * 100 / UI_BASE_H) ? \
                              (UI_SCREEN_W * 100 / UI_BASE_W) : (UI_SCREEN_H * 100 / UI_BASE_H))
 
+/*
+ * How a page change is animated. 1 = both pages move sideways together, like pages being
+ * pushed; 0 = the new page covers the old one, which stays put, so about half as much is
+ * redrawn per frame (for boards that are short of speed). The board decides; a simulator
+ * can define it.
+ */
+#ifndef UI_PUSH_TRANSITION
+#ifdef BOARD_UI_PUSH_TRANSITION
+#define UI_PUSH_TRANSITION      BOARD_UI_PUSH_TRANSITION
+#else
+#define UI_PUSH_TRANSITION      0
+#endif
+#endif
+
 #define UI_STATUS_BAR_H     UI_SY(36)
 #define UI_GAP              UI_SU(8)
 #define UI_CARD_PAD         UI_SU(14)

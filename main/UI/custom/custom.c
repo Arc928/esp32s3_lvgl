@@ -10,9 +10,13 @@
 /*
  * Entry point called after setup_ui().
  *
- * Home page: the machine gallery. Tapping a machine opens its detail page
- * (BMS on the left half, other information on the right half). "返回" or a
- * swipe to the left or right goes back home.
+ * The home page (the machine gallery) and the detail page (BMS on the left half,
+ * other information on the right half) are the left and right page of a pager.
+ * The home page picks the machine: the picked card is highlighted and shown on the
+ * detail page. Tapping a card picks it and opens the detail page; a swipe to the
+ * left on the home page opens the detail page of the highlighted machine; a swipe
+ * to the right on the detail page, or "返回", goes back. Swipes the other way do
+ * nothing, there is no page there.
  *
  * The Wi-Fi icon in the status bar of both pages opens the Wi-Fi page; "返回"
  * there returns to the page it was opened from.
@@ -24,14 +28,29 @@
 #include "gallery_view.h"
 #include "machine_view.h"
 #include "wifi_view.h"
+#include "ui_common.h"
 
 #define REFRESH_MS      500U
-#define PAGE_SWITCH_MS  200U  /* OVER_*：新页盖上来，旧页不动，每帧重绘量约为 MOVE_* 的一半 */
+
+/*
+ * Page transitions, see UI_PUSH_TRANSITION: MOVE_* pushes both pages sideways together,
+ * OVER_* lets the new page cover the old one.
+ */
+#if UI_PUSH_TRANSITION
+#define PAGE_SWITCH_MS  250U
+#define ANIM_FORWARD    LV_SCREEN_LOAD_ANIM_MOVE_LEFT   /* new page comes in from the right */
+#define ANIM_BACK       LV_SCREEN_LOAD_ANIM_MOVE_RIGHT  /* new page comes in from the left */
+#else
+#define PAGE_SWITCH_MS  200U
+#define ANIM_FORWARD    LV_SCREEN_LOAD_ANIM_OVER_LEFT
+#define ANIM_BACK       LV_SCREEN_LOAD_ANIM_OVER_RIGHT
+#endif
 
 static lv_obj_t *s_home;
 static lv_obj_t *s_detail;
 static lv_obj_t *s_wifi;
 static lv_obj_t *s_wifi_return;  /* page the Wi-Fi page was opened from */
+static uint32_t s_selected;      /* machine shown on the detail page */
 
 static bool page_switching(void)
 {
@@ -55,23 +74,19 @@ static void open_machine(uint32_t machine_index)
     if(page_switching() || lv_screen_active() != s_home) {
         return;
     }
+    s_selected = machine_index;
+    gallery_view_set_selected(machine_index);
     machine_view_set_machine(machine_index);
     refresh(NULL);
-    lv_screen_load_anim(s_detail, LV_SCREEN_LOAD_ANIM_OVER_LEFT, PAGE_SWITCH_MS, 0, false);
-}
-
-/* The home page slides in following the finger (or from the left for "返回"). */
-static void slide_home(lv_screen_load_anim_t anim)
-{
-    if(page_switching() || lv_screen_active() != s_detail) {
-        return;
-    }
-    lv_screen_load_anim(s_home, anim, PAGE_SWITCH_MS, 0, false);
+    lv_screen_load_anim(s_detail, ANIM_FORWARD, PAGE_SWITCH_MS, 0, false);
 }
 
 static void go_home(void)
 {
-    slide_home(LV_SCREEN_LOAD_ANIM_OVER_RIGHT);
+    if(page_switching() || lv_screen_active() != s_detail) {
+        return;
+    }
+    lv_screen_load_anim(s_home, ANIM_BACK, PAGE_SWITCH_MS, 0, false);
 }
 
 static void open_wifi(void)
@@ -83,7 +98,7 @@ static void open_wifi(void)
     }
     s_wifi_return = from;
     wifi_view_enter();
-    lv_screen_load_anim(s_wifi, LV_SCREEN_LOAD_ANIM_OVER_LEFT, PAGE_SWITCH_MS, 0, false);
+    lv_screen_load_anim(s_wifi, ANIM_FORWARD, PAGE_SWITCH_MS, 0, false);
 }
 
 static void close_wifi(void)
@@ -92,10 +107,10 @@ static void close_wifi(void)
         return;
     }
     wifi_view_leave();
-    lv_screen_load_anim(s_wifi_return, LV_SCREEN_LOAD_ANIM_OVER_RIGHT, PAGE_SWITCH_MS, 0, false);
+    lv_screen_load_anim(s_wifi_return, ANIM_BACK, PAGE_SWITCH_MS, 0, false);
 }
 
-/* A swipe to the left or to the right goes back home. */
+/* Right page of the pager: only a swipe to the right (back to the left page) does anything. */
 static void on_detail_gesture(lv_event_t *e)
 {
     lv_dir_t dir = lv_indev_get_gesture_dir(lv_indev_active());
@@ -105,7 +120,24 @@ static void on_detail_gesture(lv_event_t *e)
         return;
     }
     lv_indev_wait_release(lv_indev_active());
-    slide_home(dir == LV_DIR_LEFT ? LV_SCREEN_LOAD_ANIM_OVER_LEFT : LV_SCREEN_LOAD_ANIM_OVER_RIGHT);
+    if(dir == LV_DIR_RIGHT) {
+        go_home();
+    }
+}
+
+/* Left page of the pager: a swipe to the left opens the detail page of the highlighted machine. */
+static void on_home_gesture(lv_event_t *e)
+{
+    lv_dir_t dir = lv_indev_get_gesture_dir(lv_indev_active());
+
+    LV_UNUSED(e);
+    if(dir != LV_DIR_LEFT && dir != LV_DIR_RIGHT) {
+        return;
+    }
+    lv_indev_wait_release(lv_indev_active());
+    if(dir == LV_DIR_LEFT) {
+        open_machine(s_selected);
+    }
 }
 
 void custom_init(lv_ui *ui)
@@ -116,6 +148,8 @@ void custom_init(lv_ui *ui)
 
     s_wifi = wifi_view_create(close_wifi);
     s_home = gallery_view_create(open_machine, open_wifi);
+    gallery_view_set_selected(s_selected);
+    lv_obj_add_event_cb(s_home, on_home_gesture, LV_EVENT_GESTURE, NULL);
     lv_screen_load(s_home);
 
     refresh(NULL);

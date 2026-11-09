@@ -35,6 +35,7 @@
 static gallery_select_cb_t s_on_select;
 static gallery_wifi_cb_t s_on_wifi;
 static lv_obj_t *s_clock;
+static lv_obj_t *s_cards[MACHINE_COUNT];
 
 /**********************
  *   BUILD
@@ -93,6 +94,7 @@ static void build_card(lv_obj_t *screen, uint32_t index)
     lv_obj_set_pos(card, x, y);
     lv_obj_set_size(card, CELL_W, CELL_H);
     ui_style_card(card);
+    s_cards[index] = card;
 
     /* The whole card is the button; its children let touches through. */
     ui_set_clickable(card, true);
@@ -136,5 +138,23 @@ void gallery_view_update(void)
 {
     if(s_clock != NULL) {
         ui_update_clock(s_clock);
+    }
+}
+
+void gallery_view_set_selected(uint32_t machine_index)
+{
+    uint32_t i;
+
+    for(i = 0; i < MACHINE_COUNT; i++) {
+        bool selected = (i == machine_index);
+
+        if(s_cards[i] == NULL) {
+            continue;
+        }
+        lv_obj_set_style_border_color(s_cards[i], lv_color_hex(selected ? DASH_COLOR_ACCENT : DASH_COLOR_BORDER),
+                                      LV_PART_MAIN);
+        lv_obj_set_style_border_width(s_cards[i], selected ? UI_SU(2) : 1, LV_PART_MAIN);
+        lv_obj_set_style_bg_color(s_cards[i], lv_color_hex(selected ? DASH_COLOR_PRESSED : DASH_COLOR_SURFACE),
+                                  LV_PART_MAIN);
     }
 }

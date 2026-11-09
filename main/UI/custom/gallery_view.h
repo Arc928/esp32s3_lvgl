@@ -24,6 +24,9 @@ lv_obj_t *gallery_view_create(gallery_select_cb_t on_select, gallery_wifi_cb_t o
 /* Refreshes the clock. */
 void gallery_view_update(void);
 
+/* Marks the card of the machine the detail page shows (the right page of the pager). */
+void gallery_view_set_selected(uint32_t machine_index);
+
 #ifdef __cplusplus
 }
 #endif
