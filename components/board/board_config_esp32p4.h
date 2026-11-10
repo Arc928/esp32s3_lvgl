@@ -38,6 +38,10 @@
 /* 局部绘制缓冲放内部 RAM：1024 x 50 x 2 字节 = 100KB。P4 的 Wi-Fi 跑在 C6 上，内部 RAM 不紧张 */
 #define BOARD_DISPLAY_BUFFER_LINES      50
 
+/* LVGL 的堆（控件、样式、绘制数据）先放内部 RAM，内部 RAM 剩余不足这个数就改放 PSRAM（见 board_lv_mem.c）。
+ * 留给 Wi-Fi 远程栈、网络、MQTT、任务栈和 DMA；S3 不定义，仍然全放 PSRAM。要改回全放 PSRAM，删掉这一行 */
+#define BOARD_LV_HEAP_INTERNAL_RESERVE  (128 * 1024)
+
 /* ==================== I2C 总线（GT911 和板载音频芯片挂在这条总线上；外接 MPU6050 也接这里） ==================== */
 #define BOARD_I2C_PORT                  I2C_NUM_0
 #define BOARD_I2C_PIN_SDA               GPIO_NUM_7

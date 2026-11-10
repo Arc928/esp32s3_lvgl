@@ -13,6 +13,10 @@
  *   BOARD_HAS_EXIO              1=屏幕复位、背光、触摸复位接在 CH422G 上
  *   BOARD_TOUCH_*               触摸的 I2C 速率和坐标镜像
  *   BOARD_UI_PUSH_TRANSITION    1=页面切换时新旧两页一起平移；0=新页盖在旧页上（界面层用，见 ui_common.h）
+ *
+ * 可选：
+ *   BOARD_LV_HEAP_INTERNAL_RESERVE  定义后 LVGL 的堆先用内部 RAM，剩余不足这个字节数才放 PSRAM；
+ *                                   不定义则全放 PSRAM（见 board_lv_mem.c）
  */
 
 #pragma once
