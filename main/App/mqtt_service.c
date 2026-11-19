@@ -1,6 +1,6 @@
 /*
  * mqtt_service.c
- * MQTT 服务实现
+ * MQTT 服务实现 - 订阅大棚下行控制主题，校验并解析 device_control 命令
  */
 
 #include "mqtt_service.h"
@@ -8,69 +8,267 @@
 #if __has_include("mqtt_secrets.h")
 #include "mqtt_secrets.h"
 #else
-#error "缺少 mqtt_secrets.h：请复制 mqtt_secrets.h.example 为 mqtt_secrets.h 并填写 broker 地址和账号"
+#error "缺少 mqtt_secrets.h：请复制 mqtt_secrets.h.example 为 mqtt_secrets.h 并填写配置"
+#endif
+
+#if !defined(MQTT_GHCODE) || !defined(MQTT_GHCHECK)
+#error "mqtt_secrets.h 缺少 MQTT_GHCODE 或 MQTT_GHCHECK，请参考 mqtt_secrets.h.example 补齐"
 #endif
 
 #include <stdio.h>
-#include <time.h>
+#include <string.h>
 #include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
+#include "freertos/semphr.h"
 #include "esp_check.h"
 #include "esp_log.h"
 #include "esp_mac.h"
 #include "esp_netif.h"
+#include "esp_timer.h"
 #include "esp_crt_bundle.h"
 #include "mqtt_client.h"
+#include "cJSON.h"
 #include "app_event.h"
 
 #define TAG "MQTT_SERVICE"
 
-#define MQTT_TOPIC_ROOT         "esp32s3_lvgl"
-#define MQTT_PUBLISH_PERIOD_MS  1000    /* IMU 是 10Hz，上传降到 1Hz */
-#define MQTT_KEEPALIVE_S        30      /* broker 在 1.5 倍 keepalive（约 45 秒）收不到心跳就发遗嘱 */
-#define MQTT_TASK_STACK         4096
-#define MQTT_TASK_PRIO          2       /* 低于 IMU（3）和 LVGL（6） */
-
-/* 2016-01-01 00:00:00 UTC，早于这个值说明还没对时（和 time_service 的判断一致） */
-#define TIME_VALID_AFTER        1451606400
+#define MQTT_CONTROL_TOPIC_PREFIX   "greenhouse/machine/control/"
+#define MQTT_CONTROL_SUB_QOS        1
+#define MQTT_KEEPALIVE_S            30
+#define MQTT_RX_MAX_LEN             1024    /* 单条下行 JSON 最大字节数（含结尾 '\0'） */
+#define MQTT_DEVICE_COUNT           (APP_CONTROL_DEVICE_MAX - APP_CONTROL_DEVICE_MIN + 1)
 
 static esp_mqtt_client_handle_t s_client = NULL;
-static TaskHandle_t s_task = NULL;
+static SemaphoreHandle_t s_lock = NULL;
 static volatile bool s_connected = false;   /* 只在 esp-mqtt 任务里写 */
 static bool s_started = false;              /* 只在默认事件循环任务里读写 */
 
-static char s_client_id[24];        /* MQTT 3.1.1 要求 broker 至少支持 23 个字符 */
-static char s_topic_imu[48];
-static char s_topic_status[48];
+static char s_client_id[24];                /* MQTT 3.1.1 要求 broker 至少支持 23 个字符 */
+static char s_topic_control[96];
 
-/* IMU 事件处理函数写，上传任务读；数据只有十几个字节，用自旋锁即可 */
-static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
-static app_imu_data_t s_imu = {0};
-static bool s_imu_fresh = false;
+/* 分片接收缓冲：只在 esp-mqtt 任务里访问，不需要加锁 */
+static char s_rx_buf[MQTT_RX_MAX_LEN];
+static size_t s_rx_total = 0;
+static size_t s_rx_received = 0;
+static bool s_rx_active = false;
 
-/* 在默认事件循环里运行，只拷贝数据，不做网络操作，避免卡住其他事件 */
-static void on_imu_data(void *arg, esp_event_base_t base, int32_t id, void *data)
+/* 按设备号 1~9 缓存最新一条已校验通过的控制命令，由 s_lock 保护 */
+static app_device_control_t s_latest_cmds[MQTT_DEVICE_COUNT];
+static bool s_has_cmd[MQTT_DEVICE_COUNT];
+
+static void reset_rx(void)
 {
-    const app_imu_data_t *imu = data;
-
-    portENTER_CRITICAL(&s_lock);
-    s_imu = *imu;
-    s_imu_fresh = true;
-    portEXIT_CRITICAL(&s_lock);
+    s_rx_active = false;
+    s_rx_total = 0;
+    s_rx_received = 0;
 }
 
-/* 取出上次上传之后的最新一帧；传感器离线时没有新帧，返回 false */
-static bool take_fresh_imu(app_imu_data_t *out)
+static bool parse_action(const char *str, app_control_action_t *out)
 {
-    portENTER_CRITICAL(&s_lock);
-    bool fresh = s_imu_fresh;
-    if (fresh) {
-        *out = s_imu;
-        s_imu_fresh = false;
+    if (strcmp(str, "start") == 0) {
+        *out = APP_CTRL_ACTION_START;
+        return true;
     }
-    portEXIT_CRITICAL(&s_lock);
+    if (strcmp(str, "stop") == 0) {
+        *out = APP_CTRL_ACTION_STOP;
+        return true;
+    }
+    if (strcmp(str, "reset") == 0) {
+        *out = APP_CTRL_ACTION_RESET;
+        return true;
+    }
+    if (strcmp(str, "maintenance") == 0) {
+        *out = APP_CTRL_ACTION_MAINTENANCE;
+        return true;
+    }
+    if (strcmp(str, "other") == 0) {
+        *out = APP_CTRL_ACTION_OTHER;
+        return true;
+    }
+    return false;
+}
 
-    return fresh;
+static bool parse_device_control(const char *payload, size_t len, app_device_control_t *out)
+{
+    bool ok = false;
+    cJSON *root = cJSON_ParseWithLength(payload, len);
+
+    if (root == NULL || !cJSON_IsObject(root)) {
+        ESP_LOGW(TAG, "drop message: invalid JSON");
+        goto cleanup;
+    }
+
+    const cJSON *type = cJSON_GetObjectItemCaseSensitive(root, "type");
+    if (!cJSON_IsString(type) || type->valuestring == NULL) {
+        ESP_LOGW(TAG, "drop message: missing 'type'");
+        goto cleanup;
+    }
+    if (strcmp(type->valuestring, "device_control") != 0) {
+        ESP_LOGW(TAG, "drop message: unsupported type \"%s\"", type->valuestring);
+        goto cleanup;
+    }
+
+    const cJSON *ghcode = cJSON_GetObjectItemCaseSensitive(root, "ghcode");
+    if (!cJSON_IsString(ghcode) || ghcode->valuestring == NULL ||
+        strcmp(ghcode->valuestring, MQTT_GHCODE) != 0) {
+        ESP_LOGW(TAG, "drop message: ghcode mismatch (got \"%s\")",
+                 (cJSON_IsString(ghcode) && ghcode->valuestring != NULL) ? ghcode->valuestring : "");
+        goto cleanup;
+    }
+
+    const cJSON *ghcheck = cJSON_GetObjectItemCaseSensitive(root, "ghcheck");
+    if (!cJSON_IsString(ghcheck) || ghcheck->valuestring == NULL ||
+        strcmp(ghcheck->valuestring, MQTT_GHCHECK) != 0) {
+        ESP_LOGW(TAG, "drop message: ghcheck mismatch");
+        goto cleanup;
+    }
+
+    memset(out, 0, sizeof(*out));
+
+    /* timestamp 为毫秒级时间戳（超过 32 位，需用 valuedouble 读取） */
+    const cJSON *ts = cJSON_GetObjectItemCaseSensitive(root, "timestamp");
+    if (ts != NULL && !cJSON_IsNull(ts)) {
+        if (!cJSON_IsNumber(ts) || !(ts->valuedouble >= 0.0 && ts->valuedouble <= 9007199254740991.0)) {
+            ESP_LOGW(TAG, "drop message: invalid 'timestamp'");
+            goto cleanup;
+        }
+        out->timestamp_ms = (int64_t)ts->valuedouble;
+    }
+
+    cJSON *data = cJSON_GetObjectItemCaseSensitive(root, "data");
+    if (!cJSON_IsObject(data)) {
+        ESP_LOGW(TAG, "drop message: missing or invalid 'data' object");
+        goto cleanup;
+    }
+
+    const cJSON *dev = cJSON_GetObjectItemCaseSensitive(data, "deviceId");
+    if (!cJSON_IsString(dev) || dev->valuestring == NULL ||
+        dev->valuestring[0] < ('0' + APP_CONTROL_DEVICE_MIN) ||
+        dev->valuestring[0] > ('0' + APP_CONTROL_DEVICE_MAX) ||
+        dev->valuestring[1] != '\0') {
+        ESP_LOGW(TAG, "drop message: invalid 'deviceId' (expected \"1\"..\"9\")");
+        goto cleanup;
+    }
+    out->device_id = (uint8_t)(dev->valuestring[0] - '0');
+
+    const cJSON *action = cJSON_GetObjectItemCaseSensitive(data, "action");
+    if (!cJSON_IsString(action) || action->valuestring == NULL ||
+        !parse_action(action->valuestring, &out->action)) {
+        ESP_LOGW(TAG, "drop message: invalid 'action' (\"%s\")",
+                 (cJSON_IsString(action) && action->valuestring != NULL) ? action->valuestring : "");
+        goto cleanup;
+    }
+
+    const cJSON *other = cJSON_GetObjectItemCaseSensitive(data, "other_cmd_info");
+    if (other != NULL && !cJSON_IsNull(other)) {
+        if (!cJSON_IsString(other) || other->valuestring == NULL) {
+            ESP_LOGW(TAG, "drop message: invalid 'other_cmd_info'");
+            goto cleanup;
+        }
+        size_t copied = strlcpy(out->other_cmd_info, other->valuestring, sizeof(out->other_cmd_info));
+        if (copied >= sizeof(out->other_cmd_info)) {
+            ESP_LOGW(TAG, "'other_cmd_info' truncated to %u bytes",
+                     (unsigned)(sizeof(out->other_cmd_info) - 1));
+        }
+    }
+
+    cJSON *params = cJSON_GetObjectItemCaseSensitive(data, "parameters");
+    if (params == NULL || cJSON_IsNull(params)) {
+        strlcpy(out->parameters, "{}", sizeof(out->parameters));
+    } else if (!cJSON_IsObject(params)) {
+        ESP_LOGW(TAG, "drop message: invalid 'parameters' (expected JSON object)");
+        goto cleanup;
+    } else if (!cJSON_PrintPreallocated(params, out->parameters, (int)sizeof(out->parameters), false)) {
+        ESP_LOGW(TAG, "'parameters' exceeds %u bytes, dropped", (unsigned)sizeof(out->parameters));
+        out->parameters[0] = '\0';
+    }
+
+    out->received_us = esp_timer_get_time();
+    ok = true;
+
+cleanup:
+    cJSON_Delete(root);
+    return ok;
+}
+
+static void handle_control_payload(const char *payload, size_t len)
+{
+    app_device_control_t cmd;
+
+    if (!parse_device_control(payload, len, &cmd)) {
+        return;
+    }
+
+    size_t idx = (size_t)(cmd.device_id - APP_CONTROL_DEVICE_MIN);
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    s_latest_cmds[idx] = cmd;
+    s_has_cmd[idx] = true;
+    xSemaphoreGive(s_lock);
+
+    ESP_LOGI(TAG, "control cmd: device=%u action=%s ts=%lld other=\"%s\" params=%s",
+             (unsigned)cmd.device_id, app_control_action_to_str(cmd.action),
+             (long long)cmd.timestamp_ms, cmd.other_cmd_info, cmd.parameters);
+
+    app_event_publish_device_control(&cmd);
+}
+
+static void on_mqtt_data(const esp_mqtt_event_t *event)
+{
+    if (event->current_data_offset < 0 || event->data_len < 0 || event->total_data_len <= 0) {
+        reset_rx();
+        return;
+    }
+
+    size_t offset = (size_t)event->current_data_offset;
+    size_t chunk_len = (size_t)event->data_len;
+    size_t total_len = (size_t)event->total_data_len;
+
+    if (offset == 0) {
+        reset_rx();
+
+        size_t expected_len = strlen(s_topic_control);
+        if (event->topic == NULL || (size_t)event->topic_len != expected_len ||
+            memcmp(event->topic, s_topic_control, expected_len) != 0) {
+            ESP_LOGW(TAG, "ignore message on unexpected topic \"%.*s\"",
+                     event->topic_len, event->topic != NULL ? event->topic : "");
+            return;
+        }
+        if (total_len >= sizeof(s_rx_buf)) {
+            ESP_LOGW(TAG, "drop oversized message (%u bytes, max %u)",
+                     (unsigned)total_len, (unsigned)(sizeof(s_rx_buf) - 1));
+            return;
+        }
+        if (chunk_len > total_len) {
+            return;
+        }
+
+        s_rx_total = total_len;
+        s_rx_active = true;
+    } else if (!s_rx_active) {
+        return;
+    }
+
+    if (offset != s_rx_received || offset + chunk_len > s_rx_total) {
+        ESP_LOGW(TAG, "drop malformed chunk (offset=%u len=%u expected=%u total=%u)",
+                 (unsigned)offset, (unsigned)chunk_len, (unsigned)s_rx_received, (unsigned)s_rx_total);
+        reset_rx();
+        return;
+    }
+
+    if (chunk_len > 0) {
+        if (event->data == NULL) {
+            reset_rx();
+            return;
+        }
+        memcpy(s_rx_buf + offset, event->data, chunk_len);
+        s_rx_received += chunk_len;
+    }
+
+    if (s_rx_received == s_rx_total) {
+        size_t msg_len = s_rx_total;
+        s_rx_buf[msg_len] = '\0';
+        reset_rx();
+        handle_control_payload(s_rx_buf, msg_len);
+    }
 }
 
 static void log_error(const esp_mqtt_error_codes_t *err)
@@ -91,19 +289,34 @@ static void on_mqtt_event(void *arg, esp_event_base_t base, int32_t id, void *da
     esp_mqtt_event_handle_t event = data;
 
     switch ((esp_mqtt_event_id_t)id) {
-    case MQTT_EVENT_CONNECTED:
+    case MQTT_EVENT_CONNECTED: {
         s_connected = true;
-        /* 覆盖遗嘱留下的 offline；保留消息让之后订阅的人马上知道设备在线 */
-        esp_mqtt_client_publish(s_client, s_topic_status, "online", 0, 1, 1);
+        reset_rx();
+        int msg_id = esp_mqtt_client_subscribe(s_client, s_topic_control, MQTT_CONTROL_SUB_QOS);
+        if (msg_id < 0) {
+            ESP_LOGE(TAG, "failed to subscribe to %s", s_topic_control);
+        } else {
+            ESP_LOGI(TAG, "subscribing to %s (msg_id=%d)", s_topic_control, msg_id);
+        }
         app_event_publish_mqtt_status(true);
         break;
+    }
 
     case MQTT_EVENT_DISCONNECTED:
+        reset_rx();
         /* 每次重连失败都会收到这个事件，只在状态变化时发事件，避免刷屏 */
         if (s_connected) {
             s_connected = false;
             app_event_publish_mqtt_status(false);
         }
+        break;
+
+    case MQTT_EVENT_SUBSCRIBED:
+        ESP_LOGI(TAG, "subscribed to %s (msg_id=%d)", s_topic_control, event->msg_id);
+        break;
+
+    case MQTT_EVENT_DATA:
+        on_mqtt_data(event);
         break;
 
     case MQTT_EVENT_ERROR:
@@ -132,57 +345,36 @@ static void on_got_ip(void *arg, esp_event_base_t base, int32_t id, void *data)
     ESP_LOGI(TAG, "connecting to %s as %s", MQTT_BROKER_URI, s_client_id);
 }
 
-static int format_imu_json(char *buf, size_t size, const app_imu_data_t *imu)
-{
-    time_t now = time(NULL);
-
-    if (now >= TIME_VALID_AFTER) {
-        return snprintf(buf, size, "{\"pitch\":%.2f,\"roll\":%.2f,\"yaw\":%.2f,\"ts\":%lld}",
-                        imu->pitch, imu->roll, imu->yaw, (long long)now);
-    }
-    return snprintf(buf, size, "{\"pitch\":%.2f,\"roll\":%.2f,\"yaw\":%.2f}",
-                    imu->pitch, imu->roll, imu->yaw);
-}
-
-/* 上传任务：发布会等网络写完，所以放在自己的任务里，不在事件循环里做 */
-static void mqtt_publish_task(void *arg)
-{
-    char payload[96];
-    TickType_t last_wake = xTaskGetTickCount();
-
-    while (1) {
-        vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(MQTT_PUBLISH_PERIOD_MS));
-
-        /* 先取数据再判断连接，断线期间的旧帧不会在重连后补发 */
-        app_imu_data_t imu;
-        bool fresh = take_fresh_imu(&imu);
-        if (!fresh || !s_connected) {
-            continue;
-        }
-
-        int len = format_imu_json(payload, sizeof(payload), &imu);
-        int msg_id = esp_mqtt_client_publish(s_client, s_topic_imu, payload, len, 0, 0);
-        app_event_publish_mqtt_publish_result(msg_id >= 0, s_topic_imu);
-    }
-}
-
 esp_err_t mqtt_service_start(void)
 {
     if (s_client != NULL) {
         return ESP_ERR_INVALID_STATE;
     }
 
+    if (MQTT_GHCODE[0] == '\0' || MQTT_GHCHECK[0] == '\0') {
+        ESP_LOGE(TAG, "MQTT_GHCODE and MQTT_GHCHECK must be non-empty in mqtt_secrets.h");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    int n = snprintf(s_topic_control, sizeof(s_topic_control),
+                     MQTT_CONTROL_TOPIC_PREFIX "%s", MQTT_GHCODE);
+    if (n < 0 || (size_t)n >= sizeof(s_topic_control)) {
+        ESP_LOGE(TAG, "control topic too long for ghcode \"%s\"", MQTT_GHCODE);
+        return ESP_ERR_INVALID_SIZE;
+    }
+
     /* 用基础 MAC 做设备 ID：ESP32-P4 没有片上 Wi-Fi，读 ESP_MAC_WIFI_STA 会失败；
-     * 在 S3 上 Wi-Fi STA 的 MAC 就是基础 MAC，所以 S3 的 client id 和主题保持不变 */
+     * S3 和 P4 上基础 MAC 均可用且唯一 */
     uint8_t mac[6];
     ESP_RETURN_ON_ERROR(esp_read_mac(mac, ESP_MAC_BASE), TAG, "failed to read MAC");
-
-    char id[13];
-    snprintf(id, sizeof(id), "%02x%02x%02x%02x%02x%02x",
+    snprintf(s_client_id, sizeof(s_client_id), "gh-%02x%02x%02x%02x%02x%02x",
              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-    snprintf(s_client_id, sizeof(s_client_id), "esp32s3-%s", id);
-    snprintf(s_topic_imu, sizeof(s_topic_imu), MQTT_TOPIC_ROOT "/%s/imu", id);
-    snprintf(s_topic_status, sizeof(s_topic_status), MQTT_TOPIC_ROOT "/%s/status", id);
+
+    s_lock = xSemaphoreCreateMutex();
+    if (s_lock == NULL) {
+        ESP_LOGE(TAG, "failed to create mutex");
+        return ESP_ERR_NO_MEM;
+    }
 
     const esp_mqtt_client_config_t cfg = {
         .broker.address.uri = MQTT_BROKER_URI,
@@ -192,35 +384,61 @@ esp_err_t mqtt_service_start(void)
         .credentials.username = MQTT_USERNAME[0] ? MQTT_USERNAME : NULL,
         .credentials.authentication.password = MQTT_PASSWORD[0] ? MQTT_PASSWORD : NULL,
         .session.keepalive = MQTT_KEEPALIVE_S,
-        .session.last_will = {
-            .topic = s_topic_status,
-            .msg = "offline",
-            .qos = 1,
-            .retain = 1,
-        },
     };
 
     s_client = esp_mqtt_client_init(&cfg);
     if (s_client == NULL) {
+        vSemaphoreDelete(s_lock);
+        s_lock = NULL;
         ESP_LOGE(TAG, "failed to create client");
         return ESP_ERR_NO_MEM;
     }
 
-    ESP_RETURN_ON_ERROR(esp_mqtt_client_register_event(s_client, MQTT_EVENT_ANY, on_mqtt_event, NULL),
-                        TAG, "failed to register MQTT events");
-    ESP_RETURN_ON_ERROR(esp_event_handler_instance_register(APP_EVENTS, APP_IMU_DATA_UPDATED,
-                                                            on_imu_data, NULL, NULL),
-                        TAG, "failed to subscribe IMU data");
-    ESP_RETURN_ON_ERROR(esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP,
-                                                            on_got_ip, NULL, NULL),
-                        TAG, "failed to subscribe IP event");
-
-    if (xTaskCreate(mqtt_publish_task, "mqtt_pub", MQTT_TASK_STACK,
-                    NULL, MQTT_TASK_PRIO, &s_task) != pdPASS) {
-        ESP_LOGE(TAG, "failed to create task");
-        return ESP_ERR_NO_MEM;
+    esp_err_t err = esp_mqtt_client_register_event(s_client, MQTT_EVENT_ANY, on_mqtt_event, NULL);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "failed to register MQTT events: %s", esp_err_to_name(err));
+        goto fail;
     }
 
-    ESP_LOGI(TAG, "IMU data -> %s, status -> %s", s_topic_imu, s_topic_status);
+    err = esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP,
+                                              on_got_ip, NULL, NULL);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "failed to subscribe IP event: %s", esp_err_to_name(err));
+        goto fail;
+    }
+
+    ESP_LOGI(TAG, "control topic -> %s (ghcode=%s)", s_topic_control, MQTT_GHCODE);
     return ESP_OK;
+
+fail:
+    esp_mqtt_client_destroy(s_client);
+    s_client = NULL;
+    vSemaphoreDelete(s_lock);
+    s_lock = NULL;
+    return err;
+}
+
+bool mqtt_service_is_connected(void)
+{
+    return s_connected;
+}
+
+bool mqtt_service_get_latest_control(uint8_t device_id, app_device_control_t *out)
+{
+    if (out == NULL || s_lock == NULL ||
+        device_id < APP_CONTROL_DEVICE_MIN || device_id > APP_CONTROL_DEVICE_MAX) {
+        return false;
+    }
+
+    size_t idx = (size_t)(device_id - APP_CONTROL_DEVICE_MIN);
+    bool has = false;
+
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    if (s_has_cmd[idx]) {
+        *out = s_latest_cmds[idx];
+        has = true;
+    }
+    xSemaphoreGive(s_lock);
+
+    return has;
 }

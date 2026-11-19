@@ -65,6 +65,41 @@ void app_event_publish_mqtt_publish_result(bool success, const char *topic)
     ESP_LOGD(TAG, "MQTT publish %s: %s", success ? "success" : "failed", topic);
 }
 
+const char *app_control_action_to_str(app_control_action_t action)
+{
+    switch (action) {
+    case APP_CTRL_ACTION_START:
+        return "start";
+    case APP_CTRL_ACTION_STOP:
+        return "stop";
+    case APP_CTRL_ACTION_RESET:
+        return "reset";
+    case APP_CTRL_ACTION_MAINTENANCE:
+        return "maintenance";
+    case APP_CTRL_ACTION_OTHER:
+        return "other";
+    default:
+        return "unknown";
+    }
+}
+
+void app_event_publish_device_control(const app_device_control_t *cmd)
+{
+    if (cmd == NULL) {
+        return;
+    }
+
+    esp_err_t err = esp_event_post(APP_EVENTS, APP_MQTT_DEVICE_CONTROL,
+                                   cmd, sizeof(*cmd), pdMS_TO_TICKS(100));
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to post device control event: %s", esp_err_to_name(err));
+        return;
+    }
+
+    ESP_LOGD(TAG, "Device control posted: device=%u action=%s",
+             (unsigned)cmd->device_id, app_control_action_to_str(cmd->action));
+}
+
 void app_event_publish_sensor_error(const char *sensor_name, int error_code)
 {
     char error_msg[64];
