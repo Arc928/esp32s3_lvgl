@@ -18,11 +18,14 @@ typedef void (*gallery_select_cb_t)(uint32_t machine_index);
 /* Called when the Wi-Fi icon in the status bar is tapped. */
 typedef void (*gallery_wifi_cb_t)(void);
 
-/* Builds the home page on a new screen and returns that screen (not loaded). */
-lv_obj_t *gallery_view_create(gallery_select_cb_t on_select, gallery_wifi_cb_t on_wifi);
+/* Called when the status-bar MQTT indicator pill is tapped. */
+typedef void (*gallery_mqtt_cb_t)(void);
 
-/* Refreshes the clock. */
-void gallery_view_update(void);
+/* Builds the home page on a new screen and returns that screen (not loaded). */
+lv_obj_t *gallery_view_create(gallery_select_cb_t on_select, gallery_wifi_cb_t on_wifi, gallery_mqtt_cb_t on_mqtt);
+
+/* Refreshes the clock and MQTT connection status. */
+void gallery_view_update(bool mqtt_connected);
 
 /* Marks the card of the machine the detail page shows (the right page of the pager). */
 void gallery_view_set_selected(uint32_t machine_index);

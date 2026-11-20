@@ -109,11 +109,13 @@ static struct {
     bool created;
     machine_view_back_cb_t on_back;
     machine_view_wifi_cb_t on_wifi;
+    machine_view_mqtt_cb_t on_mqtt;
 
     /* Status bar */
     lv_obj_t *title_number;
     lv_obj_t *title_name;
     lv_obj_t *clock;
+    ui_mqtt_pill_t mqtt_pill;
 
     /* BMS */
     lamp_t can;
@@ -365,6 +367,14 @@ static void on_wifi_clicked(lv_event_t *e)
     }
 }
 
+static void on_mqtt_clicked(lv_event_t *e)
+{
+    LV_UNUSED(e);
+    if(s_view.on_mqtt != NULL) {
+        s_view.on_mqtt();
+    }
+}
+
 static void build_back_button(lv_obj_t *bar)
 {
     lv_obj_t *button = ui_create_box(bar);
@@ -407,6 +417,8 @@ static void build_status_bar(lv_ui *ui)
     lv_obj_align(title, LV_ALIGN_CENTER, 0, 0);
     s_view.title_number = ui_create_label(title, DASH_FONT_SMALL, DASH_COLOR_ACCENT, "--");
     s_view.title_name = ui_create_label(title, DASH_FONT_BODY, DASH_COLOR_TEXT, "--");
+
+    s_view.mqtt_pill = ui_create_mqtt_pill(bar, on_mqtt_clicked);
 
     s_view.clock = ui->screen_time;
     lv_obj_set_size(s_view.clock, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
@@ -562,7 +574,8 @@ static void build_other_card(lv_obj_t *screen)
     lv_obj_align(label, LV_ALIGN_CENTER, 0, placeholder_y);
 }
 
-void machine_view_create(lv_ui *ui, machine_view_back_cb_t on_back, machine_view_wifi_cb_t on_wifi)
+void machine_view_create(lv_ui *ui, machine_view_back_cb_t on_back, machine_view_wifi_cb_t on_wifi,
+                         machine_view_mqtt_cb_t on_mqtt)
 {
     lv_obj_t *screen = ui->screen;
 
@@ -571,6 +584,7 @@ void machine_view_create(lv_ui *ui, machine_view_back_cb_t on_back, machine_view
     }
     s_view.on_back = on_back;
     s_view.on_wifi = on_wifi;
+    s_view.on_mqtt = on_mqtt;
 
     /* GUI Guider drew this screen at 800 x 480. */
     lv_obj_set_size(screen, UI_SCREEN_W, UI_SCREEN_H);
@@ -763,7 +777,7 @@ static void update_imu(const imu_data_t *imu)
     show_fixed(s_view.yaw.value, valid, valid ? imu->yaw_deg : 0.0f, 1, DASH_COLOR_TEXT);
 }
 
-void machine_view_update(const bms_data_t *bms, const imu_data_t *imu)
+void machine_view_update(const bms_data_t *bms, const imu_data_t *imu, bool mqtt_connected)
 {
     bool online;
     const bms_data_t *d;
@@ -776,6 +790,7 @@ void machine_view_update(const bms_data_t *bms, const imu_data_t *imu)
     d = online ? bms : &k_no_bms;
 
     ui_update_clock(s_view.clock);
+    ui_update_mqtt_pill(&s_view.mqtt_pill, mqtt_connected);
     update_status(d, online);
     update_soc(d, online);
     update_pack(d, online);

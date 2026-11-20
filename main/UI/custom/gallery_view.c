@@ -34,7 +34,9 @@
  **********************/
 static gallery_select_cb_t s_on_select;
 static gallery_wifi_cb_t s_on_wifi;
+static gallery_mqtt_cb_t s_on_mqtt;
 static lv_obj_t *s_clock;
+static ui_mqtt_pill_t s_mqtt_pill;
 static lv_obj_t *s_cards[MACHINE_COUNT];
 
 /**********************
@@ -45,6 +47,14 @@ static void on_wifi_clicked(lv_event_t *e)
     LV_UNUSED(e);
     if(s_on_wifi != NULL) {
         s_on_wifi();
+    }
+}
+
+static void on_mqtt_clicked(lv_event_t *e)
+{
+    LV_UNUSED(e);
+    if(s_on_mqtt != NULL) {
+        s_on_mqtt();
     }
 }
 
@@ -61,6 +71,8 @@ static void build_status_bar(lv_obj_t *screen)
 
     label = ui_create_label(bar, DASH_FONT_BODY, DASH_COLOR_TEXT, "农机设备");
     lv_obj_align(label, LV_ALIGN_CENTER, 0, 0);
+
+    s_mqtt_pill = ui_create_mqtt_pill(bar, on_mqtt_clicked);
 
     s_clock = ui_create_label(bar, DASH_FONT_BODY, DASH_COLOR_TEXT, "--:--:--");
     lv_obj_align(s_clock, LV_ALIGN_RIGHT_MID, -44, 0);
@@ -119,26 +131,28 @@ static void build_card(lv_obj_t *screen, uint32_t index)
     ui_create_label(caption, DASH_FONT_BODY, DASH_COLOR_TEXT, m->name);
 }
 
-lv_obj_t *gallery_view_create(gallery_select_cb_t on_select, gallery_wifi_cb_t on_wifi)
+lv_obj_t *gallery_view_create(gallery_select_cb_t on_select, gallery_wifi_cb_t on_wifi, gallery_mqtt_cb_t on_mqtt)
 {
     lv_obj_t *screen = ui_create_screen();
     uint32_t i;
 
     s_on_select = on_select;
     s_on_wifi = on_wifi;
+    s_on_mqtt = on_mqtt;
     build_status_bar(screen);
     for(i = 0; i < MACHINE_COUNT; i++) {
         build_card(screen, i);
     }
-    gallery_view_update();
+    gallery_view_update(false);
     return screen;
 }
 
-void gallery_view_update(void)
+void gallery_view_update(bool mqtt_connected)
 {
     if(s_clock != NULL) {
         ui_update_clock(s_clock);
     }
+    ui_update_mqtt_pill(&s_mqtt_pill, mqtt_connected);
 }
 
 void gallery_view_set_selected(uint32_t machine_index)

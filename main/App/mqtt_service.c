@@ -51,15 +51,39 @@ static size_t s_rx_total = 0;
 static size_t s_rx_received = 0;
 static bool s_rx_active = false;
 
-/* 按设备号 1~9 缓存最新一条已校验通过的控制命令，由 s_lock 保护 */
+/* 按设备号 1~9 及全局缓存最新一条已校验通过的控制命令，由 s_lock 保护 */
 static app_device_control_t s_latest_cmds[MQTT_DEVICE_COUNT];
 static bool s_has_cmd[MQTT_DEVICE_COUNT];
+static app_device_control_t s_last_cmd;
+static bool s_has_last_cmd = false;
+static uint32_t s_cmd_seq = 0;
 
 static void reset_rx(void)
 {
     s_rx_active = false;
     s_rx_total = 0;
     s_rx_received = 0;
+}
+
+static bool parse_direction_action(const char *str, app_control_action_t *out)
+{
+    if (strcmp(str, "forward") == 0) {
+        *out = APP_CTRL_ACTION_FORWARD;
+        return true;
+    }
+    if (strcmp(str, "backward") == 0) {
+        *out = APP_CTRL_ACTION_BACKWARD;
+        return true;
+    }
+    if (strcmp(str, "left") == 0) {
+        *out = APP_CTRL_ACTION_LEFT;
+        return true;
+    }
+    if (strcmp(str, "right") == 0) {
+        *out = APP_CTRL_ACTION_RIGHT;
+        return true;
+    }
+    return false;
 }
 
 static bool parse_action(const char *str, app_control_action_t *out)
@@ -84,7 +108,8 @@ static bool parse_action(const char *str, app_control_action_t *out)
         *out = APP_CTRL_ACTION_OTHER;
         return true;
     }
-    return false;
+    /* 兼容直接通过 action 字段下发方向指令的情况 */
+    return parse_direction_action(str, out);
 }
 
 static bool parse_device_control(const char *payload, size_t len, app_device_control_t *out)
@@ -169,6 +194,10 @@ static bool parse_device_control(const char *payload, size_t len, app_device_con
             ESP_LOGW(TAG, "'other_cmd_info' truncated to %u bytes",
                      (unsigned)(sizeof(out->other_cmd_info) - 1));
         }
+        /* 大屏方向指令复用 action="other" + other_cmd_info="forward"/"backward"/"left"/"right" */
+        if (out->action == APP_CTRL_ACTION_OTHER) {
+            (void)parse_direction_action(other->valuestring, &out->action);
+        }
     }
 
     cJSON *params = cJSON_GetObjectItemCaseSensitive(data, "parameters");
@@ -200,12 +229,19 @@ static void handle_control_payload(const char *payload, size_t len)
 
     size_t idx = (size_t)(cmd.device_id - APP_CONTROL_DEVICE_MIN);
     xSemaphoreTake(s_lock, portMAX_DELAY);
+    s_cmd_seq++;
+    if (s_cmd_seq == 0U) {
+        s_cmd_seq = 1U;
+    }
+    cmd.seq = s_cmd_seq;
     s_latest_cmds[idx] = cmd;
     s_has_cmd[idx] = true;
+    s_last_cmd = cmd;
+    s_has_last_cmd = true;
     xSemaphoreGive(s_lock);
 
-    ESP_LOGI(TAG, "control cmd: device=%u action=%s ts=%lld other=\"%s\" params=%s",
-             (unsigned)cmd.device_id, app_control_action_to_str(cmd.action),
+    ESP_LOGI(TAG, "control cmd #%lu: device=%u action=%s ts=%lld other=\"%s\" params=%s",
+             (unsigned long)cmd.seq, (unsigned)cmd.device_id, app_control_action_to_str(cmd.action),
              (long long)cmd.timestamp_ms, cmd.other_cmd_info, cmd.parameters);
 
     app_event_publish_device_control(&cmd);
@@ -421,6 +457,24 @@ fail:
 bool mqtt_service_is_connected(void)
 {
     return s_connected;
+}
+
+bool mqtt_service_get_last_control(app_device_control_t *out)
+{
+    if (out == NULL || s_lock == NULL) {
+        return false;
+    }
+
+    bool has = false;
+
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    if (s_has_last_cmd) {
+        *out = s_last_cmd;
+        has = true;
+    }
+    xSemaphoreGive(s_lock);
+
+    return has;
 }
 
 bool mqtt_service_get_latest_control(uint8_t device_id, app_device_control_t *out)

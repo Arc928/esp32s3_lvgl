@@ -76,6 +76,14 @@ const char *app_control_action_to_str(app_control_action_t action)
         return "reset";
     case APP_CTRL_ACTION_MAINTENANCE:
         return "maintenance";
+    case APP_CTRL_ACTION_FORWARD:
+        return "forward";
+    case APP_CTRL_ACTION_BACKWARD:
+        return "backward";
+    case APP_CTRL_ACTION_LEFT:
+        return "left";
+    case APP_CTRL_ACTION_RIGHT:
+        return "right";
     case APP_CTRL_ACTION_OTHER:
         return "other";
     default:

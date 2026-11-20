@@ -9,7 +9,10 @@
  *  - greenhouse/machine/control/<MQTT_GHCODE>
  *
  * 下行 JSON（type == "device_control"）经 ghcode、ghcheck、deviceId("1"~"9")、
- * action(start/stop/reset/maintenance/other) 校验通过后：
+ * action(start/stop/reset/maintenance/other，以及兼容直接下发的 forward/backward/left/right)
+ * 校验通过后：
+ *  - 当 action == "other" 且 other_cmd_info 为 "forward"/"backward"/"left"/"right" 时，
+ *    映射为对应的方向动作（APP_CTRL_ACTION_FORWARD / BACKWARD / LEFT / RIGHT）
  *  - 按设备号（1~9）缓存最新一条命令，可用 mqtt_service_get_latest_control() 读取
  *  - 发布 APP_EVENTS / APP_MQTT_DEVICE_CONTROL 事件（数据为 app_device_control_t）
  *
@@ -36,6 +39,13 @@ esp_err_t mqtt_service_start(void);
  * @brief 查询当前是否已连接到 MQTT broker（线程安全）
  */
 bool mqtt_service_is_connected(void);
+
+/**
+ * @brief 读取最近收到的一条控制命令（不限设备号，线程安全）
+ * @param out 输出的控制命令
+ * @return true=已收到过有效命令并拷贝到 out；false=尚未收到命令或参数无效
+ */
+bool mqtt_service_get_last_control(app_device_control_t *out);
 
 /**
  * @brief 读取指定设备最近收到的一条控制命令（线程安全）

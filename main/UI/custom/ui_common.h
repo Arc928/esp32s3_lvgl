@@ -100,6 +100,18 @@ lv_obj_t *ui_create_row(lv_obj_t *parent, int32_t x, int32_t y, lv_flex_align_t 
 /* In a bottom-aligned row, moves a smaller label so its baseline matches the larger font. */
 void ui_match_baseline(lv_obj_t *label, const lv_font_t *own, const lv_font_t *reference);
 
+/* Status-bar MQTT indicator pill (tapping reopens the latest control command dialog). */
+typedef struct {
+    lv_obj_t *pill;
+    lv_obj_t *dot;
+    lv_obj_t *label;
+    bool connected;
+    bool initialized;
+} ui_mqtt_pill_t;
+
+ui_mqtt_pill_t ui_create_mqtt_pill(lv_obj_t *bar, lv_event_cb_t on_click);
+void ui_update_mqtt_pill(ui_mqtt_pill_t *pill, bool connected);
+
 /**********************
  *   UPDATES
  **********************/
