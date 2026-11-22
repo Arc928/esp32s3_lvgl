@@ -3,14 +3,14 @@
 #   esp32s3  RGB 并口屏（board_lcd.c）+ CH422G IO 扩展（board_exio.c）
 #   esp32p4  MIPI DSI 屏（board_lcd_dsi.c），没有 IO 扩展芯片
 if(IDF_TARGET STREQUAL "esp32p4")
-    idf_component_register(SRCS "board_lcd_dsi.c" "board_i2c.c" "board_touch.c" "board_display.c" "board_lv_mem.c"
+    idf_component_register(SRCS "board_lcd_dsi.c" "board_i2c.c" "board_can.c" "board_touch.c" "board_display.c" "board_lv_mem.c"
                            INCLUDE_DIRS "."
-                           REQUIRES esp_driver_gpio esp_driver_i2c esp_lcd esp_lcd_touch esp_lvgl_adapter
+                           REQUIRES esp_driver_gpio esp_driver_i2c esp_driver_twai esp_lcd esp_lcd_touch esp_lvgl_adapter
                            PRIV_REQUIRES esp_lcd_touch_gt911 esp_lcd_ek79007 esp_driver_ledc esp_hw_support heap)
 else()
-    idf_component_register(SRCS "board_lcd.c" "board_i2c.c" "board_exio.c" "board_touch.c" "board_display.c" "board_lv_mem.c"
+    idf_component_register(SRCS "board_lcd.c" "board_i2c.c" "board_exio.c" "board_can.c" "board_touch.c" "board_display.c" "board_lv_mem.c"
                            INCLUDE_DIRS "."
-                           REQUIRES esp_driver_gpio esp_driver_i2c esp_lcd esp_lcd_touch esp_lvgl_adapter
+                           REQUIRES esp_driver_gpio esp_driver_i2c esp_driver_twai esp_lcd esp_lcd_touch esp_lvgl_adapter
                            PRIV_REQUIRES esp_lcd_touch_gt911 heap)
 endif()
 

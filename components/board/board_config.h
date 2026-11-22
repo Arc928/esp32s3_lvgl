@@ -5,12 +5,13 @@
  *   esp32s3  800x480 RGB 并口屏 + CH422G IO 扩展 + GT911（微雪 ESP32-S3-Touch-LCD-4.3）
  *   esp32p4  1024x600 MIPI DSI 屏（EK79007）+ GT911（微雪 ESP32-P4-WIFI6-Touch-LCD-7B）
  *
- * 各头文件都要提供 board_lcd / board_touch / board_display / board_i2c 用到的这些宏：
+ * 各头文件都要提供 board_lcd / board_touch / board_display / board_i2c / board_can 用到的这些宏：
  *   BOARD_LCD_IS_DSI            1=MIPI DSI 屏，0=RGB 并口屏
  *   BOARD_LCD_H_RES / V_RES     屏幕分辨率
  *   BOARD_DISPLAY_*             LVGL 适配层的旋转、防撕裂模式、局部绘制缓冲行数
  *   BOARD_I2C_*                 I2C 总线
  *   BOARD_HAS_EXIO              1=屏幕复位、背光、触摸复位接在 CH422G 上
+ *   BOARD_HAS_CAN               1=板载 CAN（TWAI）已配置，提供 BOARD_CAN_PIN_TX / RX / DEFAULT_BITRATE
  *   BOARD_TOUCH_*               触摸的 I2C 速率和坐标镜像
  *   BOARD_UI_PUSH_TRANSITION    1=页面切换时新旧两页一起平移；0=新页盖在旧页上（界面层用，见 ui_common.h）
  *
