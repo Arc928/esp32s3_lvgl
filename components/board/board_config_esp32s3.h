@@ -9,6 +9,7 @@
 
 #define BOARD_LCD_IS_DSI                0
 #define BOARD_HAS_EXIO                  1
+#define BOARD_HAS_CAN                   1
 #define BOARD_UI_PUSH_TRANSITION        0       /* 页面切换用覆盖动画：新页盖上来，每帧只重绘一半画面 */
 
 /* ==================== LCD：800x480 RGB565 16 位并口屏 ==================== */
@@ -85,3 +86,9 @@
 #define BOARD_TOUCH_I2C_SPEED_HZ        400000
 #define BOARD_TOUCH_MIRROR_X            0
 #define BOARD_TOUCH_MIRROR_Y            0
+
+/* ==================== CAN（TWAI，与原生 USB 共用 GPIO19/20，由 CH422G EXIO5 切换） ==================== */
+/* 调用 board_can_init() 时会拉高 BOARD_EXIO_USB_SEL 切到 CAN 模式；原生 USB 口将断开，日志与烧录请用 UART 口 */
+#define BOARD_CAN_PIN_TX                GPIO_NUM_20
+#define BOARD_CAN_PIN_RX                GPIO_NUM_19
+#define BOARD_CAN_DEFAULT_BITRATE       500000  /* 默认 500 kbps，按实际 CAN 总线速率调整 */
