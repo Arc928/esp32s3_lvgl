@@ -16,8 +16,27 @@
 #include <string.h>
 #include "esp_timer.h"
 #include "lvgl.h"
+#include "bms_service.h"
 #include "imu_service.h"
 #include "mqtt_service.h"
+
+/* esp_timer_get_time() 从上电起算，lv_tick_get() 从 LVGL 适配层启动起算，
+ * 两者存在固定偏移；先算已过去时长再换算到 LVGL tick 基准，避免相对时间下溢。 */
+static uint32_t esp_time_us_to_lv_tick_ms(int64_t time_us)
+{
+    int64_t age_us = esp_timer_get_time() - time_us;
+    uint32_t age_ms;
+
+    if (age_us <= 0) {
+        age_ms = 0U;
+    } else if (age_us >= (int64_t)UINT32_MAX * 1000LL) {
+        age_ms = UINT32_MAX;
+    } else {
+        age_ms = (uint32_t)(age_us / 1000LL);
+    }
+
+    return lv_tick_get() - age_ms;
+}
 
 static mqtt_cmd_action_t map_control_action(app_control_action_t action)
 {
@@ -46,38 +65,58 @@ static mqtt_cmd_action_t map_control_action(app_control_action_t action)
 
 static void convert_control_cmd(const app_device_control_t *src, mqtt_cmd_data_t *dst)
 {
-    /* esp_timer_get_time() 从上电起算，lv_tick_get() 从 LVGL 适配层启动起算，
-     * 两者存在固定偏移；先算已过去时长再换算到 LVGL tick 基准，避免相对时间下溢。 */
-    int64_t age_us = esp_timer_get_time() - src->received_us;
-    uint32_t age_ms;
-
-    if (age_us <= 0) {
-        age_ms = 0U;
-    } else if (age_us >= (int64_t)UINT32_MAX * 1000LL) {
-        age_ms = UINT32_MAX;
-    } else {
-        age_ms = (uint32_t)(age_us / 1000LL);
-    }
-
     memset(dst, 0, sizeof(*dst));
     dst->seq = src->seq;
     dst->device_id = src->device_id;
     dst->action = map_control_action(src->action);
     dst->timestamp_ms = src->timestamp_ms;
-    dst->received_tick_ms = lv_tick_get() - age_ms;
+    dst->received_tick_ms = esp_time_us_to_lv_tick_ms(src->received_us);
     strlcpy(dst->other_cmd_info, src->other_cmd_info, sizeof(dst->other_cmd_info));
     strlcpy(dst->parameters, src->parameters, sizeof(dst->parameters));
 }
 
-/*
- * 本项目还没有 BMS CAN 接收服务，先一直返回 false，界面显示“CAN 离线”。
- * 接入后在这里把最新一帧拷到 out，字段名与 bms_can_data_t 一致，
- * last_update_ms 要用 lv_tick_get() 的时间基准（界面靠它判断 3 秒离线）。
- */
+/* 收到过至少一帧有效 BMS CAN 报文后返回 true；界面依据 last_update_ms 判断 3 秒离线。 */
 bool bms_data_get_latest(bms_data_t *out)
 {
-    (void)out;
-    return false;
+    bms_can_data_t src;
+
+    if (out == NULL || !bms_service_get_latest(&src)) {
+        return false;
+    }
+
+    memset(out, 0, sizeof(*out));
+    out->pack_voltage_v = src.pack_voltage_v;
+    out->pack_current_a = src.pack_current_a;
+    out->soc_percent = src.soc_percent;
+    out->soh_percent = src.soh_percent;
+    out->full_charge_capacity_ah = src.full_charge_capacity_ah;
+
+    out->max_cell_voltage_v = src.max_cell_voltage_v;
+    out->min_cell_voltage_v = src.min_cell_voltage_v;
+    out->max_cell_position = src.max_cell_position;
+    out->min_cell_position = src.min_cell_position;
+
+    out->max_temperature_c = src.max_temperature_c;
+    out->min_temperature_c = src.min_temperature_c;
+    out->max_temperature_position = src.max_temperature_position;
+    out->min_temperature_position = src.min_temperature_position;
+    out->relay_charge = src.relay_charge;
+    out->relay_discharge = src.relay_discharge;
+    out->relay_precharge = src.relay_precharge;
+    out->relay_heat = src.relay_heat;
+    out->relay_negative = src.relay_negative;
+    out->relay_charge_stick = src.relay_charge_stick;
+    out->relay_discharge_stick = src.relay_discharge_stick;
+    out->relay_negative_stick = src.relay_negative_stick;
+    out->relay_raw = src.relay_raw;
+    out->fault_code = src.fault_code;
+
+    out->has_alarm = src.has_alarm;
+    memcpy(out->alarm, src.alarm, sizeof(out->alarm));
+
+    out->rx_count = src.rx_count;
+    out->last_update_ms = esp_time_us_to_lv_tick_ms(src.last_update_us);
+    return true;
 }
 
 /* 传感器还在初始化或已离线时返回 false，界面显示 "--" */
