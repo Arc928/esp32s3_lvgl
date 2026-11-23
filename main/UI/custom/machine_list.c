@@ -14,16 +14,26 @@ LV_IMAGE_DECLARE(img_machine_07);
 LV_IMAGE_DECLARE(img_machine_08);
 LV_IMAGE_DECLARE(img_machine_09);
 
+LV_IMAGE_DECLARE(img_machine_lg_01);
+LV_IMAGE_DECLARE(img_machine_lg_02);
+LV_IMAGE_DECLARE(img_machine_lg_03);
+LV_IMAGE_DECLARE(img_machine_lg_04);
+LV_IMAGE_DECLARE(img_machine_lg_05);
+LV_IMAGE_DECLARE(img_machine_lg_06);
+LV_IMAGE_DECLARE(img_machine_lg_07);
+LV_IMAGE_DECLARE(img_machine_lg_08);
+LV_IMAGE_DECLARE(img_machine_lg_09);
+
 static const machine_info_t k_machines[MACHINE_COUNT] = {
-    {&img_machine_01, "旋耕起垄机"},
-    {&img_machine_02, "运输小车"},
-    {&img_machine_03, "覆膜机"},
-    {&img_machine_04, "对靶喷药机"},
-    {&img_machine_05, "茄果类收获机"},
-    {&img_machine_06, "多功能作业车"},
-    {&img_machine_07, "施肥机"},
-    {&img_machine_08, "移栽机"},
-    {&img_machine_09, "叶菜收获机"},
+    {&img_machine_01, &img_machine_lg_01, "旋耕起垄机"},
+    {&img_machine_02, &img_machine_lg_02, "运输小车"},
+    {&img_machine_03, &img_machine_lg_03, "覆膜机"},
+    {&img_machine_04, &img_machine_lg_04, "对靶喷药机"},
+    {&img_machine_05, &img_machine_lg_05, "茄果类收获机"},
+    {&img_machine_06, &img_machine_lg_06, "多功能作业车"},
+    {&img_machine_07, &img_machine_lg_07, "施肥机"},
+    {&img_machine_08, &img_machine_lg_08, "移栽机"},
+    {&img_machine_09, &img_machine_lg_09, "叶菜收获机"},
 };
 
 const machine_info_t *machine_get(uint32_t index)

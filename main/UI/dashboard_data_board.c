@@ -133,6 +133,11 @@ bool imu_data_get_latest(imu_data_t *out)
     return true;
 }
 
+/* MQTT 服务由 main.c 在网络初始化阶段统一启动，此处留空以保持与模拟器接口一致。 */
+void mqtt_data_init(void)
+{
+}
+
 bool mqtt_data_is_connected(void)
 {
     return mqtt_service_is_connected();

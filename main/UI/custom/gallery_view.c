@@ -72,7 +72,7 @@ static void build_status_bar(lv_obj_t *screen)
     label = ui_create_label(bar, DASH_FONT_BODY, DASH_COLOR_TEXT, "农机设备");
     lv_obj_align(label, LV_ALIGN_CENTER, 0, 0);
 
-    s_mqtt_pill = ui_create_mqtt_pill(bar, on_mqtt_clicked);
+    s_mqtt_pill = ui_create_mqtt_pill(bar, s_on_mqtt != NULL ? on_mqtt_clicked : NULL);
 
     s_clock = ui_create_label(bar, DASH_FONT_BODY, DASH_COLOR_TEXT, "--:--:--");
     lv_obj_align(s_clock, LV_ALIGN_RIGHT_MID, -44, 0);

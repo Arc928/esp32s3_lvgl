@@ -67,6 +67,8 @@ extern "C" {
 void ui_set_clickable(lv_obj_t *obj, bool en);
 void ui_set_scrollable(lv_obj_t *obj, bool en);
 void ui_set_hidden(lv_obj_t *obj, bool en);
+bool ui_is_hidden(const lv_obj_t *obj);
+void ui_set_overflow_visible(lv_obj_t *obj, bool en);
 
 /* Display-only object: touches pass through to the parent, no scrolling. */
 void ui_make_static(lv_obj_t *obj);

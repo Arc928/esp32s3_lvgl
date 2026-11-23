@@ -59,6 +59,29 @@ void ui_set_hidden(lv_obj_t *obj, bool en)
 #endif
 }
 
+bool ui_is_hidden(const lv_obj_t *obj)
+{
+#if UI_HAS_FLAG_SETTERS
+    return lv_obj_is_hidden(obj);
+#else
+    return lv_obj_has_flag(obj, LV_OBJ_FLAG_HIDDEN);
+#endif
+}
+
+void ui_set_overflow_visible(lv_obj_t *obj, bool en)
+{
+#if UI_HAS_FLAG_SETTERS
+    lv_obj_set_overflow_visible(obj, en);
+#else
+    if(en) {
+        lv_obj_add_flag(obj, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
+    }
+    else {
+        lv_obj_remove_flag(obj, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
+    }
+#endif
+}
+
 void ui_make_static(lv_obj_t *obj)
 {
     ui_set_clickable(obj, false);
@@ -179,11 +202,11 @@ ui_mqtt_pill_t ui_create_mqtt_pill(lv_obj_t *bar, lv_event_cb_t on_click)
     lv_obj_set_style_border_color(m.pill, lv_color_hex(DASH_COLOR_BORDER), LV_PART_MAIN);
     lv_obj_set_style_bg_color(m.pill, lv_color_hex(DASH_COLOR_SURFACE), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(m.pill, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(m.pill, lv_color_hex(DASH_COLOR_PRESSED), LV_PART_MAIN | LV_STATE_PRESSED);
-    lv_obj_set_style_border_color(m.pill, lv_color_hex(DASH_COLOR_ACCENT), LV_PART_MAIN | LV_STATE_PRESSED);
-    ui_set_clickable(m.pill, true);
-    lv_obj_set_ext_click_area(m.pill, UI_SU(6));
     if(on_click != NULL) {
+        lv_obj_set_style_bg_color(m.pill, lv_color_hex(DASH_COLOR_PRESSED), LV_PART_MAIN | LV_STATE_PRESSED);
+        lv_obj_set_style_border_color(m.pill, lv_color_hex(DASH_COLOR_ACCENT), LV_PART_MAIN | LV_STATE_PRESSED);
+        ui_set_clickable(m.pill, true);
+        lv_obj_set_ext_click_area(m.pill, UI_SU(6));
         lv_obj_add_event_cb(m.pill, on_click, LV_EVENT_CLICKED, NULL);
     }
 

@@ -213,6 +213,10 @@ bool imu_data_get_latest(imu_data_t *out)
     return true;
 }
 
+void mqtt_data_init(void)
+{
+}
+
 bool mqtt_data_is_connected(void)
 {
     return true;

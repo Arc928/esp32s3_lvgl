@@ -99,6 +99,7 @@ bool bms_data_get_latest(bms_data_t *out);
 bool imu_data_get_latest(imu_data_t *out);
 
 /* MQTT connection state and latest downlink control command. */
+void mqtt_data_init(void);
 bool mqtt_data_is_connected(void);
 bool mqtt_data_get_latest_cmd(mqtt_cmd_data_t *out);
 bool mqtt_data_get_device_cmd(uint8_t device_id, mqtt_cmd_data_t *out);

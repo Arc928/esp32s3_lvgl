@@ -10,19 +10,19 @@
 /*
  * Entry point called after setup_ui().
  *
- * The home page (the machine gallery) and the detail page (BMS on the left half,
- * other information on the right half) are the left and right page of a pager.
- * The home page picks the machine: the picked card is highlighted and shown on the
- * detail page. Tapping a card picks it and opens the detail page; a swipe to the
- * left on the home page opens the detail page of the highlighted machine; a swipe
- * to the right on the detail page, or "返回", goes back. Swipes the other way do
- * nothing, there is no page there.
+ * The home page (the machine gallery) and the detail page (machine photo on the
+ * left half, 8 MQTT control commands on the right half) are the left and right
+ * page of a pager. The home page picks the machine: the picked card is highlighted
+ * and shown on the detail page. Tapping a card picks it and opens the detail page;
+ * a swipe to the left on the home page opens the detail page of the highlighted
+ * machine; a swipe to the right on the detail page, or "返回", goes back. Swipes
+ * the other way do nothing, there is no page there.
  *
  * The Wi-Fi icon in the status bar of both pages opens the Wi-Fi page; "返回"
  * there returns to the page it was opened from.
  *
- * Incoming MQTT device control commands pop up a modal dialog on lv_layer_top();
- * tapping the status-bar MQTT pill reopens the latest command (or status view).
+ * Incoming MQTT device control commands automatically switch to the target
+ * machine's detail page and magnify the matching command in place.
  */
 
 #include "lvgl.h"
@@ -30,11 +30,10 @@
 #include "dashboard_data.h"
 #include "gallery_view.h"
 #include "machine_view.h"
-#include "mqtt_cmd_dialog.h"
 #include "wifi_view.h"
 #include "ui_common.h"
 
-#define REFRESH_MS      500U
+#define REFRESH_MS      200U
 
 /*
  * Page transitions, see UI_PUSH_TRANSITION: MOVE_* pushes both pages sideways together,
@@ -55,65 +54,53 @@ static lv_obj_t *s_detail;
 static lv_obj_t *s_wifi;
 static lv_obj_t *s_wifi_return;  /* page the Wi-Fi page was opened from */
 static uint32_t s_selected;      /* machine shown on the detail page */
+static uint32_t s_last_cmd_seq;
 
 static bool page_switching(void)
 {
     return lv_display_get_screen_loading(lv_display_get_default()) != NULL;
 }
 
-static bool viewing_same_machine(const mqtt_cmd_data_t *cmd)
+static void handle_incoming_cmd(void)
 {
-    return cmd != NULL && lv_screen_active() == s_detail &&
-           cmd->device_id >= MQTT_CMD_DEVICE_MIN &&
-           (uint32_t)(cmd->device_id - MQTT_CMD_DEVICE_MIN) == s_selected;
-}
-
-static void refresh(lv_timer_t *timer)
-{
-    bms_data_t bms;
-    imu_data_t imu;
     mqtt_cmd_data_t cmd;
-    bool has_bms = bms_data_get_latest(&bms);
-    bool has_imu = imu_data_get_latest(&imu);
-    bool mqtt_ok = mqtt_data_is_connected();
+    uint32_t target_idx;
+    lv_obj_t *active;
 
-    LV_UNUSED(timer);
-    gallery_view_update(mqtt_ok);
-    machine_view_update(has_bms ? &bms : NULL, has_imu ? &imu : NULL, mqtt_ok);
-
-    if(mqtt_data_get_latest_cmd(&cmd) && cmd.seq != mqtt_cmd_dialog_last_seq()) {
-        mqtt_cmd_dialog_show(&cmd, viewing_same_machine(&cmd));
-    }
-    mqtt_cmd_dialog_refresh(mqtt_ok);
-}
-
-static void open_machine(uint32_t machine_index)
-{
-    if(page_switching() || lv_screen_active() != s_home) {
+    if(!mqtt_data_get_latest_cmd(&cmd) || cmd.seq == s_last_cmd_seq) {
         return;
     }
-    s_selected = machine_index;
-    gallery_view_set_selected(machine_index);
-    machine_view_set_machine(machine_index);
-    refresh(NULL);
-    lv_screen_load_anim(s_detail, ANIM_FORWARD, PAGE_SWITCH_MS, 0, false);
-}
 
-static void open_machine_from_dialog(uint32_t machine_index)
-{
-    lv_obj_t *active = lv_screen_active();
+    if(cmd.device_id < MQTT_CMD_DEVICE_MIN || cmd.device_id > MQTT_CMD_DEVICE_MAX) {
+        s_last_cmd_seq = cmd.seq;
+        return;
+    }
 
+    /* Defer while a screen transition animation is in flight so no command is dropped. */
     if(page_switching()) {
         return;
     }
-    s_selected = machine_index;
-    gallery_view_set_selected(machine_index);
-    machine_view_set_machine(machine_index);
-    refresh(NULL);
+
+    s_last_cmd_seq = cmd.seq;
+    target_idx = (uint32_t)(cmd.device_id - MQTT_CMD_DEVICE_MIN);
+    active = lv_screen_active();
 
     if(active == s_detail) {
+        if(s_selected != target_idx) {
+            s_selected = target_idx;
+            gallery_view_set_selected(target_idx);
+            machine_view_set_machine(target_idx);
+        }
+        machine_view_set_cmd(&cmd, true);
         return;
     }
+
+    s_selected = target_idx;
+    gallery_view_set_selected(target_idx);
+    machine_view_set_machine(target_idx);
+    machine_view_set_cmd(&cmd, true);
+    machine_view_update(NULL, NULL, mqtt_data_is_connected());
+
     if(active == s_wifi) {
         wifi_view_leave();
         lv_screen_load_anim(s_detail, ANIM_BACK, PAGE_SWITCH_MS, 0, false);
@@ -122,19 +109,43 @@ static void open_machine_from_dialog(uint32_t machine_index)
     lv_screen_load_anim(s_detail, ANIM_FORWARD, PAGE_SWITCH_MS, 0, false);
 }
 
-static void open_mqtt_dialog(void)
+static void refresh(lv_timer_t *timer)
 {
-    mqtt_cmd_data_t cmd;
     bool mqtt_ok = mqtt_data_is_connected();
 
-    if(mqtt_data_get_latest_cmd(&cmd)) {
-        mqtt_cmd_dialog_show(&cmd, viewing_same_machine(&cmd));
+    LV_UNUSED(timer);
+    gallery_view_update(mqtt_ok);
+    machine_view_update(NULL, NULL, mqtt_ok);
+    handle_incoming_cmd();
+}
+
+static void open_machine(uint32_t machine_index)
+{
+    mqtt_cmd_data_t dev_cmd;
+
+    if(page_switching() || lv_screen_active() != s_home) {
+        return;
+    }
+    s_selected = machine_index;
+    gallery_view_set_selected(machine_index);
+    machine_view_set_machine(machine_index);
+    if(mqtt_data_get_device_cmd((uint8_t)(machine_index + MQTT_CMD_DEVICE_MIN), &dev_cmd)) {
+        machine_view_set_cmd(&dev_cmd, false);
     }
     else {
-        mqtt_cmd_dialog_show_empty(mqtt_ok);
+        machine_view_set_cmd(NULL, false);
     }
-    mqtt_cmd_dialog_refresh(mqtt_ok);
+    machine_view_update(NULL, NULL, mqtt_data_is_connected());
+    lv_screen_load_anim(s_detail, ANIM_FORWARD, PAGE_SWITCH_MS, 0, false);
 }
+
+#if DASHBOARD_DATA_MOCK
+static void on_mock_mqtt_pill_clicked(void)
+{
+    mqtt_data_mock_trigger_next();
+    handle_incoming_cmd();
+}
+#endif
 
 static void go_home(void)
 {
@@ -171,7 +182,7 @@ static void on_detail_gesture(lv_event_t *e)
     lv_dir_t dir = lv_indev_get_gesture_dir(lv_indev_active());
 
     LV_UNUSED(e);
-    if(mqtt_cmd_dialog_is_open() || (dir != LV_DIR_LEFT && dir != LV_DIR_RIGHT)) {
+    if(dir != LV_DIR_LEFT && dir != LV_DIR_RIGHT) {
         return;
     }
     lv_indev_wait_release(lv_indev_active());
@@ -186,7 +197,7 @@ static void on_home_gesture(lv_event_t *e)
     lv_dir_t dir = lv_indev_get_gesture_dir(lv_indev_active());
 
     LV_UNUSED(e);
-    if(mqtt_cmd_dialog_is_open() || (dir != LV_DIR_LEFT && dir != LV_DIR_RIGHT)) {
+    if(dir != LV_DIR_LEFT && dir != LV_DIR_RIGHT) {
         return;
     }
     lv_indev_wait_release(lv_indev_active());
@@ -197,16 +208,22 @@ static void on_home_gesture(lv_event_t *e)
 
 void custom_init(lv_ui *ui)
 {
-    machine_view_create(ui, go_home, open_wifi, open_mqtt_dialog);
+#if DASHBOARD_DATA_MOCK
+    machine_view_mqtt_cb_t mqtt_cb = on_mock_mqtt_pill_clicked;
+#else
+    machine_view_mqtt_cb_t mqtt_cb = NULL;
+#endif
+
+    mqtt_data_init();
+    machine_view_create(ui, go_home, open_wifi, mqtt_cb);
     s_detail = ui->screen;
     lv_obj_add_event_cb(s_detail, on_detail_gesture, LV_EVENT_GESTURE, NULL);
 
     s_wifi = wifi_view_create(close_wifi);
-    s_home = gallery_view_create(open_machine, open_wifi, open_mqtt_dialog);
+    s_home = gallery_view_create(open_machine, open_wifi, mqtt_cb);
     gallery_view_set_selected(s_selected);
     lv_obj_add_event_cb(s_home, on_home_gesture, LV_EVENT_GESTURE, NULL);
 
-    mqtt_cmd_dialog_init(open_machine_from_dialog);
     lv_screen_load(s_home);
 
     refresh(NULL);

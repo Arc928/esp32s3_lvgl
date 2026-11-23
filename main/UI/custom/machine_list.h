@@ -14,7 +14,8 @@ extern "C" {
 #define MACHINE_COUNT 9U
 
 typedef struct {
-    const lv_image_dsc_t *image; /* fits 248 x 106, see tools/gen_images.sh */
+    const lv_image_dsc_t *image;        /* gallery size: fits 248 x 106 */
+    const lv_image_dsc_t *detail_image; /* detail page size: fits 340 x 260 */
     const char *name;
 } machine_info_t;
 
