@@ -19,17 +19,21 @@ typedef void (*machine_view_back_cb_t)(void);
 /* Called when the Wi-Fi icon in the status bar is tapped. */
 typedef void (*machine_view_wifi_cb_t)(void);
 
+/* Called when the user taps the status-bar MQTT indicator pill. */
+typedef void (*machine_view_mqtt_cb_t)(void);
+
 /*
  * Builds the page on ui->screen. Keeps the GUI Guider status bar, clock,
  * Wi-Fi icon and LED, and replaces the GUI Guider IMU panel.
  */
-void machine_view_create(lv_ui *ui, machine_view_back_cb_t on_back, machine_view_wifi_cb_t on_wifi);
+void machine_view_create(lv_ui *ui, machine_view_back_cb_t on_back, machine_view_wifi_cb_t on_wifi,
+                         machine_view_mqtt_cb_t on_mqtt);
 
 /* Shows the photo and name of a machine (index from machine_list.h). */
 void machine_view_set_machine(uint32_t machine_index);
 
 /* Pass NULL for data that has not been received yet. */
-void machine_view_update(const bms_data_t *bms, const imu_data_t *imu);
+void machine_view_update(const bms_data_t *bms, const imu_data_t *imu, bool mqtt_connected);
 
 #ifdef __cplusplus
 }

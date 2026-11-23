@@ -66,9 +66,47 @@ typedef struct {
     float yaw_deg;
 } imu_data_t;
 
+/* Downlink MQTT device control command (matches app_device_control_t on ESP32). */
+#define MQTT_CMD_DEVICE_MIN         1U
+#define MQTT_CMD_DEVICE_MAX         9U
+#define MQTT_CMD_OTHER_MAX_LEN      128U
+#define MQTT_CMD_PARAMS_MAX_LEN     256U
+
+typedef enum {
+    MQTT_CMD_ACTION_START = 0,      /* start: 开始作业 */
+    MQTT_CMD_ACTION_STOP,           /* stop: 停止作业 */
+    MQTT_CMD_ACTION_RESET,          /* reset: 回停车场 */
+    MQTT_CMD_ACTION_MAINTENANCE,    /* maintenance: 维护 */
+    MQTT_CMD_ACTION_FORWARD,        /* forward: 向前行驶 */
+    MQTT_CMD_ACTION_BACKWARD,       /* backward: 向后行驶 */
+    MQTT_CMD_ACTION_LEFT,           /* left: 向左行驶 */
+    MQTT_CMD_ACTION_RIGHT,          /* right: 向右行驶 */
+    MQTT_CMD_ACTION_OTHER,          /* other: 其他自定义命令 */
+} mqtt_cmd_action_t;
+
+typedef struct {
+    uint32_t seq;                                   /* Monotonic sequence number (>0 when valid) */
+    uint8_t device_id;                              /* 1..9 */
+    mqtt_cmd_action_t action;
+    int64_t timestamp_ms;                           /* Broker message epoch ms, or 0 if omitted */
+    uint32_t received_tick_ms;                      /* lv_tick_get() when received locally */
+    char other_cmd_info[MQTT_CMD_OTHER_MAX_LEN];    /* Custom command text when action == OTHER */
+    char parameters[MQTT_CMD_PARAMS_MAX_LEN];       /* Compact JSON object string, "{}" when empty */
+} mqtt_cmd_data_t;
+
 /* Both return false until the first valid sample has been received. */
 bool bms_data_get_latest(bms_data_t *out);
 bool imu_data_get_latest(imu_data_t *out);
+
+/* MQTT connection state and latest downlink control command. */
+bool mqtt_data_is_connected(void);
+bool mqtt_data_get_latest_cmd(mqtt_cmd_data_t *out);
+bool mqtt_data_get_device_cmd(uint8_t device_id, mqtt_cmd_data_t *out);
+
+#if DASHBOARD_DATA_MOCK
+/* Simulator helper: pushes the next sample MQTT command immediately for UI review. */
+void mqtt_data_mock_trigger_next(void);
+#endif
 
 #ifdef __cplusplus
 }

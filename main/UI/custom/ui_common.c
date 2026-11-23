@@ -161,6 +161,56 @@ void ui_match_baseline(lv_obj_t *label, const lv_font_t *own, const lv_font_t *r
     lv_obj_set_style_translate_y(label, own->base_line - reference->base_line, LV_PART_MAIN);
 }
 
+ui_mqtt_pill_t ui_create_mqtt_pill(lv_obj_t *bar, lv_event_cb_t on_click)
+{
+    ui_mqtt_pill_t m;
+
+    memset(&m, 0, sizeof(m));
+    m.pill = ui_create_box(bar);
+    lv_obj_set_size(m.pill, LV_SIZE_CONTENT, UI_SY(24));
+    lv_obj_align(m.pill, LV_ALIGN_RIGHT_MID, -(44 + UI_SX(82)), 0);
+    lv_obj_set_flex_flow(m.pill, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(m.pill, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_left(m.pill, UI_SU(9), LV_PART_MAIN);
+    lv_obj_set_style_pad_right(m.pill, UI_SU(10), LV_PART_MAIN);
+    lv_obj_set_style_pad_column(m.pill, UI_SU(6), LV_PART_MAIN);
+    lv_obj_set_style_radius(m.pill, LV_RADIUS_CIRCLE, LV_PART_MAIN);
+    lv_obj_set_style_border_width(m.pill, 1, LV_PART_MAIN);
+    lv_obj_set_style_border_color(m.pill, lv_color_hex(DASH_COLOR_BORDER), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(m.pill, lv_color_hex(DASH_COLOR_SURFACE), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(m.pill, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(m.pill, lv_color_hex(DASH_COLOR_PRESSED), LV_PART_MAIN | LV_STATE_PRESSED);
+    lv_obj_set_style_border_color(m.pill, lv_color_hex(DASH_COLOR_ACCENT), LV_PART_MAIN | LV_STATE_PRESSED);
+    ui_set_clickable(m.pill, true);
+    lv_obj_set_ext_click_area(m.pill, UI_SU(6));
+    if(on_click != NULL) {
+        lv_obj_add_event_cb(m.pill, on_click, LV_EVENT_CLICKED, NULL);
+    }
+
+    m.dot = ui_create_box(m.pill);
+    lv_obj_set_size(m.dot, UI_SU(8), UI_SU(8));
+    lv_obj_set_style_radius(m.dot, LV_RADIUS_CIRCLE, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(m.dot, lv_color_hex(DASH_COLOR_OFF), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(m.dot, LV_OPA_COVER, LV_PART_MAIN);
+
+    m.label = ui_create_label(m.pill, DASH_FONT_SMALL, DASH_COLOR_MUTED, "MQTT");
+    return m;
+}
+
+void ui_update_mqtt_pill(ui_mqtt_pill_t *pill, bool connected)
+{
+    if(pill == NULL || pill->pill == NULL) {
+        return;
+    }
+    if(pill->initialized && pill->connected == connected) {
+        return;
+    }
+    pill->initialized = true;
+    pill->connected = connected;
+    lv_obj_set_style_bg_color(pill->dot, lv_color_hex(connected ? DASH_COLOR_OK : DASH_COLOR_OFF), LV_PART_MAIN);
+    ui_set_text_color(pill->label, connected ? DASH_COLOR_TEXT : DASH_COLOR_MUTED);
+}
+
 void ui_set_text(lv_obj_t *label, const char *text)
 {
     const char *current = lv_label_get_text(label);
