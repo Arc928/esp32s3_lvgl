@@ -17,6 +17,7 @@
 #include "esp_netif.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "nvs.h"
 
 #define TAG "net_service"
 
@@ -27,10 +28,23 @@
  * 否则 esp_phy_enable 里 esp_timer_create 会因 ESP_ERR_NO_MEM 直接 abort（整机重启） */
 #define SCAN_MIN_FREE_INTERNAL  (12 * 1024)
 
+/* Wi-Fi 凭据独立存在主控的 NVS 里，驱动固定使用 WIFI_STORAGE_RAM：
+ *  1. 避开 ESP-IDF 驱动在 RAM -> FLASH 切换后再次 esp_wifi_set_config 同配置跳过写 Flash 的问题；
+ *  2. ESP32-S3 / ESP32-P4 统一落盘到主控 Flash，不依赖 P4 协处理器（ESP32-C6）侧的 NVS。 */
+#define WIFI_NVS_NAMESPACE  "wifi_cfg"
+#define WIFI_NVS_KEY_CRED   "sta"
+#define WIFI_NVS_VERSION    1U
+
+typedef struct {
+    uint8_t version;
+    char ssid[NET_SSID_MAX_LEN + 1];
+    char pass[NET_PASSWORD_MAX_LEN + 1];
+} wifi_nvs_cred_t;
+
 /* 状态由三方访问：Wi-Fi/IP 事件任务、调用 API 的任务（LVGL）、持久化任务，全部用 s_lock 保护。
  * 持 s_lock 期间不调用 esp_wifi_*，避免和 Wi-Fi 任务互相等待。
  * s_wifi_cfg_lock 专门串行化 net_service_connect / net_service_disconnect / persist_task 对
- * esp_wifi_set_storage / esp_wifi_set_config 的调用（绝不在事件回调里获取）；锁序固定为
+ * Wi-Fi 配置和 NVS 写入的调用（绝不在事件回调里获取）；锁序固定为
  * s_wifi_cfg_lock -> s_lock。 */
 static SemaphoreHandle_t s_lock;
 static SemaphoreHandle_t s_wifi_cfg_lock;
@@ -67,6 +81,83 @@ static void copy_ssid(char *dst, const uint8_t *src)
     dst[NET_SSID_MAX_LEN] = '\0';
 }
 
+static void build_sta_config(wifi_config_t *cfg, const char *ssid, const char *password)
+{
+    size_t ssid_len = strnlen(ssid, NET_SSID_MAX_LEN);
+    size_t pass_len = (password != NULL) ? strnlen(password, NET_PASSWORD_MAX_LEN) : 0;
+
+    memset(cfg, 0, sizeof(*cfg));
+    memcpy(cfg->sta.ssid, ssid, ssid_len);
+    if (pass_len > 0) {
+        memcpy(cfg->sta.password, password, pass_len);
+    }
+    /* 有密码的网络必须至少是 WPA2，防止被同名的开放热点骗过去 */
+    cfg->sta.threshold.authmode = (pass_len > 0) ? WIFI_AUTH_WPA2_PSK : WIFI_AUTH_OPEN;
+    cfg->sta.sae_pwe_h2e = WPA3_SAE_PWE_BOTH;
+}
+
+static esp_err_t save_credentials_nvs(const wifi_config_t *cfg)
+{
+    wifi_nvs_cred_t cred = { 0 };
+    nvs_handle_t handle;
+    esp_err_t err;
+
+    cred.version = WIFI_NVS_VERSION;
+    copy_ssid(cred.ssid, cfg->sta.ssid);
+    memcpy(cred.pass, cfg->sta.password, NET_PASSWORD_MAX_LEN);
+    cred.pass[NET_PASSWORD_MAX_LEN] = '\0';
+
+    err = nvs_open(WIFI_NVS_NAMESPACE, NVS_READWRITE, &handle);
+    if (err == ESP_OK) {
+        err = nvs_set_blob(handle, WIFI_NVS_KEY_CRED, &cred, sizeof(cred));
+        if (err == ESP_OK) {
+            err = nvs_commit(handle);
+        }
+        nvs_close(handle);
+    }
+    memset(&cred, 0, sizeof(cred));
+    return err;
+}
+
+static bool load_credentials_nvs(wifi_config_t *cfg)
+{
+    wifi_nvs_cred_t cred = { 0 };
+    nvs_handle_t handle;
+    size_t len = sizeof(cred);
+    bool ok = false;
+
+    esp_err_t err = nvs_open(WIFI_NVS_NAMESPACE, NVS_READONLY, &handle);
+    if (err != ESP_OK) {
+        if (err != ESP_ERR_NVS_NOT_FOUND) {
+            ESP_LOGW(TAG, "Failed to open NVS namespace \"%s\": %s", WIFI_NVS_NAMESPACE, esp_err_to_name(err));
+        }
+        return false;
+    }
+
+    err = nvs_get_blob(handle, WIFI_NVS_KEY_CRED, &cred, &len);
+    nvs_close(handle);
+
+    if (err == ESP_OK) {
+        cred.ssid[NET_SSID_MAX_LEN] = '\0';
+        cred.pass[NET_PASSWORD_MAX_LEN] = '\0';
+        size_t ssid_len = strlen(cred.ssid);
+        size_t pass_len = strlen(cred.pass);
+
+        if (len == sizeof(cred) && cred.version == WIFI_NVS_VERSION &&
+            ssid_len > 0 && (pass_len == 0 || pass_len >= NET_PASSWORD_MIN_LEN)) {
+            build_sta_config(cfg, cred.ssid, cred.pass);
+            ok = true;
+        } else {
+            ESP_LOGW(TAG, "Ignoring invalid saved Wi-Fi credentials in NVS");
+        }
+    } else if (err != ESP_ERR_NVS_NOT_FOUND) {
+        ESP_LOGW(TAG, "Failed to read Wi-Fi credentials from NVS: %s", esp_err_to_name(err));
+    }
+
+    memset(&cred, 0, sizeof(cred));
+    return ok;
+}
+
 /* ==================== 连接 ==================== */
 
 static net_fail_t classify_reason(uint8_t reason)
@@ -97,27 +188,27 @@ typedef struct {
 static void persist_task(void *arg)
 {
     persist_req_t *req = arg;
+    char ssid[NET_SSID_MAX_LEN + 1];
 
+    copy_ssid(ssid, req->cfg.sta.ssid);
     xSemaphoreTake(s_wifi_cfg_lock, portMAX_DELAY);
     lock();
     bool still_current = (req->gen == s_connect_gen);
     unlock();
 
     if (still_current) {
-        esp_err_t err = esp_wifi_set_storage(WIFI_STORAGE_FLASH);
+        esp_err_t err = save_credentials_nvs(&req->cfg);
         if (err == ESP_OK) {
-            err = esp_wifi_set_config(WIFI_IF_STA, &req->cfg);
-        }
-        if (err == ESP_OK) {
-            ESP_LOGI(TAG, "Saved credentials of \"%s\"", (const char *)req->cfg.sta.ssid);
+            ESP_LOGI(TAG, "Saved credentials of \"%s\" to NVS", ssid);
         } else {
-            ESP_LOGW(TAG, "Failed to save credentials: %s", esp_err_to_name(err));
+            ESP_LOGW(TAG, "Failed to save credentials to NVS: %s", esp_err_to_name(err));
         }
     } else {
-        ESP_LOGI(TAG, "Skipped saving stale credentials of \"%s\"", (const char *)req->cfg.sta.ssid);
+        ESP_LOGI(TAG, "Skipped saving stale credentials of \"%s\"", ssid);
     }
     xSemaphoreGive(s_wifi_cfg_lock);
 
+    memset(ssid, 0, sizeof(ssid));
     memset(req, 0, sizeof(*req));
     free(req);
     vTaskDelete(NULL);
@@ -128,11 +219,13 @@ static void persist_credentials(const wifi_config_t *cfg, uint32_t gen)
     persist_req_t *req = malloc(sizeof(*req));
 
     if (req == NULL) {
+        ESP_LOGW(TAG, "No memory to save Wi-Fi credentials");
         return;
     }
     req->cfg = *cfg;
     req->gen = gen;
     if (xTaskCreate(persist_task, "wifi_save", 4096, req, 4, NULL) != pdPASS) {
+        ESP_LOGW(TAG, "Failed to start wifi_save task");
         memset(req, 0, sizeof(*req));
         free(req);
     }
@@ -378,30 +471,32 @@ static void event_handler(void *arg, esp_event_base_t event_base, int32_t event_
 
 /* ==================== 开机凭据 ==================== */
 
-/* 优先用 NVS 里保存的（界面上连过的），没有再用 wifi_secrets.h */
+/* 优先用主控 NVS 里保存的（界面上连过的），没有再用 wifi_secrets.h */
 static bool load_boot_credentials(wifi_config_t *cfg)
 {
-    memset(cfg, 0, sizeof(*cfg));
-    if (esp_wifi_get_config(WIFI_IF_STA, cfg) == ESP_OK && cfg->sta.ssid[0] != '\0') {
-        return true;
-    }
+    const char *source = NULL;
 
-#ifdef WIFI_STA_SSID
     memset(cfg, 0, sizeof(*cfg));
-    strlcpy((char *)cfg->sta.ssid, WIFI_STA_SSID, sizeof(cfg->sta.ssid));
-    strlcpy((char *)cfg->sta.password, WIFI_STA_PASSWORD, sizeof(cfg->sta.password));
-    /* 低于 WPA2 的网络（含开放网络）一律不连，和之前的行为一致 */
-    cfg->sta.threshold.authmode = (cfg->sta.password[0] != '\0') ? WIFI_AUTH_WPA2_PSK : WIFI_AUTH_OPEN;
-    cfg->sta.sae_pwe_h2e = WPA3_SAE_PWE_BOTH;
-    esp_err_t err = esp_wifi_set_config(WIFI_IF_STA, cfg);
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "Failed to apply default Wi-Fi config: %s", esp_err_to_name(err));
+    if (load_credentials_nvs(cfg)) {
+        source = "NVS";
+    }
+#ifdef WIFI_STA_SSID
+    else if (WIFI_STA_SSID[0] != '\0') {
+        build_sta_config(cfg, WIFI_STA_SSID, WIFI_STA_PASSWORD);
+        source = "wifi_secrets.h";
+    }
+#endif
+    if (source == NULL) {
         return false;
     }
+
+    esp_err_t err = esp_wifi_set_config(WIFI_IF_STA, cfg);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to apply Wi-Fi config from %s: %s", source, esp_err_to_name(err));
+        return false;
+    }
+    ESP_LOGI(TAG, "Loaded Wi-Fi \"%.*s\" from %s", NET_SSID_MAX_LEN, (const char *)cfg->sta.ssid, source);
     return true;
-#else
-    return false;
-#endif
 }
 
 /* ==================== 公开接口 ==================== */
@@ -431,6 +526,9 @@ esp_err_t net_service_start(void)
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_GOTO_ON_ERROR(esp_wifi_init(&cfg), err, TAG, "esp_wifi_init failed");
     wifi_inited = true;
+
+    /* 驱动配置只放内存，持久化由本模块通过主控 NVS 自行管理 */
+    ESP_GOTO_ON_ERROR(esp_wifi_set_storage(WIFI_STORAGE_RAM), err, TAG, "esp_wifi_set_storage failed");
 
     ESP_GOTO_ON_ERROR(esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &event_handler, NULL, &wifi_ev_inst),
                       err, TAG, "failed to register WIFI_EVENT");
@@ -561,14 +659,8 @@ esp_err_t net_service_connect(const char *ssid, const char *password)
         return ESP_ERR_INVALID_ARG;
     }
 
-    wifi_config_t cfg = { 0 };
-    memcpy(cfg.sta.ssid, ssid, ssid_len);
-    if (pass_len > 0) {
-        memcpy(cfg.sta.password, password, pass_len);
-    }
-    /* 有密码的网络必须至少是 WPA2，防止被同名的开放热点骗过去 */
-    cfg.sta.threshold.authmode = (pass_len > 0) ? WIFI_AUTH_WPA2_PSK : WIFI_AUTH_OPEN;
-    cfg.sta.sae_pwe_h2e = WPA3_SAE_PWE_BOTH;
+    wifi_config_t cfg;
+    build_sta_config(&cfg, ssid, password);
 
     xSemaphoreTake(s_wifi_cfg_lock, portMAX_DELAY);
 
@@ -587,11 +679,8 @@ esp_err_t net_service_connect(const char *ssid, const char *password)
 
     /* 当前网络可能没连上，disconnect 报错可以忽略 */
     (void)esp_wifi_disconnect();
-    /* 先只改内存里的配置；连上之后再写 NVS（见 on_got_ip） */
-    esp_err_t err = esp_wifi_set_storage(WIFI_STORAGE_RAM);
-    if (err == ESP_OK) {
-        err = esp_wifi_set_config(WIFI_IF_STA, &cfg);
-    }
+    /* 驱动配置只在内存中生效；拿到 IP 后再由 persist_task 写入主控 NVS（见 on_got_ip） */
+    esp_err_t err = esp_wifi_set_config(WIFI_IF_STA, &cfg);
     if (err == ESP_OK) {
         err = esp_wifi_connect();
     }

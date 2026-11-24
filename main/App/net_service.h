@@ -3,7 +3,7 @@
  * 网络服务 - Wi-Fi STA：扫描、连接、状态
  *
  * 凭据来源（按优先级）：
- *  1. 在界面上连接成功的网络，由 ESP-IDF 存进 NVS，下次开机自动连接
+ *  1. 在界面上连接成功的网络，由本模块存进主控 NVS（命名空间 wifi_cfg），下次开机自动连接
  *  2. NVS 里没有凭据时，使用 wifi_secrets.h 里的名称和密码（可选，不提交到 git，
  *     复制 wifi_secrets.h.example 为 wifi_secrets.h 后填写）
  *  两者都没有时只启动 Wi-Fi，等用户在界面上选择网络。
