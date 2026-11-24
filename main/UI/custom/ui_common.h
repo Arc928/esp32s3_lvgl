@@ -20,12 +20,18 @@ extern "C" {
 /*********************
  *      LAYOUT
  *********************/
-/* The panel size comes from the board; a simulator can define UI_SCREEN_W / UI_SCREEN_H instead. */
-#ifndef UI_SCREEN_W
-#include "board_config.h"
-#define UI_SCREEN_W         BOARD_LCD_H_RES
-#define UI_SCREEN_H         BOARD_LCD_V_RES
+/* Platform build can inject UI_PLATFORM_CONFIG_H (or define UI_SCREEN_W / UI_SCREEN_H directly). */
+#ifdef UI_PLATFORM_CONFIG_H
+#include UI_PLATFORM_CONFIG_H
 #endif
+
+#ifndef UI_SCREEN_W
+#define UI_SCREEN_W         800
+#define UI_SCREEN_H         480
+#endif
+
+/* Shared status-bar Wi-Fi icon bitmap (30 x 30 RGB565A8). */
+LV_IMAGE_DECLARE(_wifi1_RGB565A8_30x30);
 
 /* The screen the pages were designed for. */
 #define UI_BASE_W           800
@@ -49,11 +55,7 @@ extern "C" {
  * can define it.
  */
 #ifndef UI_PUSH_TRANSITION
-#ifdef BOARD_UI_PUSH_TRANSITION
-#define UI_PUSH_TRANSITION      BOARD_UI_PUSH_TRANSITION
-#else
 #define UI_PUSH_TRANSITION      0
-#endif
 #endif
 
 #define UI_STATUS_BAR_H     UI_SY(36)

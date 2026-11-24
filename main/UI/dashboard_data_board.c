@@ -19,6 +19,12 @@
 #include "bms_service.h"
 #include "imu_service.h"
 #include "mqtt_service.h"
+#include "net_service.h"
+
+_Static_assert(WIFI_DATA_SSID_MAX_LEN == NET_SSID_MAX_LEN, "SSID max length mismatch");
+_Static_assert(WIFI_DATA_PASS_MIN_LEN == NET_PASSWORD_MIN_LEN, "Password min length mismatch");
+_Static_assert(WIFI_DATA_PASS_MAX_LEN == NET_PASSWORD_MAX_LEN, "Password max length mismatch");
+_Static_assert(WIFI_DATA_SCAN_MAX_APS == NET_SCAN_MAX_APS, "Scan max APs mismatch");
 
 /* esp_timer_get_time() 从上电起算，lv_tick_get() 从 LVGL 适配层启动起算，
  * 两者存在固定偏移；先算已过去时长再换算到 LVGL tick 基准，避免相对时间下溢。 */
@@ -163,6 +169,137 @@ bool mqtt_data_get_device_cmd(uint8_t device_id, mqtt_cmd_data_t *out)
     }
     convert_control_cmd(&src, out);
     return true;
+}
+
+static wifi_data_auth_t map_wifi_auth(net_auth_t auth)
+{
+    switch (auth) {
+    case NET_AUTH_OPEN:
+        return WIFI_DATA_AUTH_OPEN;
+    case NET_AUTH_PSK:
+        return WIFI_DATA_AUTH_PSK;
+    case NET_AUTH_UNSUPPORTED:
+    default:
+        return WIFI_DATA_AUTH_UNSUPPORTED;
+    }
+}
+
+static wifi_data_scan_state_t map_wifi_scan_state(net_scan_state_t state)
+{
+    switch (state) {
+    case NET_SCAN_IDLE:
+        return WIFI_DATA_SCAN_IDLE;
+    case NET_SCAN_RUNNING:
+        return WIFI_DATA_SCAN_RUNNING;
+    case NET_SCAN_DONE:
+        return WIFI_DATA_SCAN_DONE;
+    case NET_SCAN_FAILED:
+    default:
+        return WIFI_DATA_SCAN_FAILED;
+    }
+}
+
+static wifi_data_state_t map_wifi_state(net_state_t state)
+{
+    switch (state) {
+    case NET_STATE_DISCONNECTED:
+        return WIFI_DATA_STATE_DISCONNECTED;
+    case NET_STATE_CONNECTING:
+        return WIFI_DATA_STATE_CONNECTING;
+    case NET_STATE_CONNECTED:
+        return WIFI_DATA_STATE_CONNECTED;
+    case NET_STATE_FAILED:
+    default:
+        return WIFI_DATA_STATE_FAILED;
+    }
+}
+
+static wifi_data_fail_t map_wifi_fail(net_fail_t fail)
+{
+    switch (fail) {
+    case NET_FAIL_NONE:
+        return WIFI_DATA_FAIL_NONE;
+    case NET_FAIL_WRONG_PASSWORD:
+        return WIFI_DATA_FAIL_WRONG_PASSWORD;
+    case NET_FAIL_NOT_FOUND:
+        return WIFI_DATA_FAIL_NOT_FOUND;
+    case NET_FAIL_OTHER:
+    default:
+        return WIFI_DATA_FAIL_OTHER;
+    }
+}
+
+wifi_data_err_t wifi_data_scan_start(void)
+{
+    esp_err_t err = net_service_scan_start();
+
+    if (err == ESP_OK) {
+        return WIFI_DATA_OK;
+    }
+    if (err == ESP_ERR_NO_MEM) {
+        return WIFI_DATA_ERR_NO_MEM;
+    }
+    if (err == ESP_ERR_INVALID_STATE) {
+        net_status_t st;
+        net_service_get_status(&st);
+        return (st.state == NET_STATE_CONNECTING) ? WIFI_DATA_ERR_BUSY : WIFI_DATA_ERR_NOT_READY;
+    }
+    return WIFI_DATA_ERR_FAIL;
+}
+
+wifi_data_scan_state_t wifi_data_scan_get(wifi_data_ap_t *aps, size_t max, size_t *count)
+{
+    net_ap_t raw[NET_SCAN_MAX_APS];
+    size_t want = (max < NET_SCAN_MAX_APS) ? max : NET_SCAN_MAX_APS;
+    size_t n = 0;
+    net_scan_state_t state = net_service_scan_get(aps != NULL ? raw : NULL, want, &n);
+
+    if (state == NET_SCAN_DONE && aps != NULL) {
+        for (size_t i = 0; i < n; i++) {
+            strlcpy(aps[i].ssid, raw[i].ssid, sizeof(aps[i].ssid));
+            aps[i].rssi = raw[i].rssi;
+            aps[i].auth = map_wifi_auth(raw[i].auth);
+        }
+    }
+    if (count != NULL) {
+        *count = n;
+    }
+    return map_wifi_scan_state(state);
+}
+
+wifi_data_err_t wifi_data_connect(const char *ssid, const char *password)
+{
+    esp_err_t err = net_service_connect(ssid, password);
+
+    if (err == ESP_OK) {
+        return WIFI_DATA_OK;
+    }
+    if (err == ESP_ERR_INVALID_ARG) {
+        return WIFI_DATA_ERR_INVALID_ARG;
+    }
+    if (err == ESP_ERR_INVALID_STATE) {
+        return WIFI_DATA_ERR_NOT_READY;
+    }
+    return WIFI_DATA_ERR_FAIL;
+}
+
+void wifi_data_disconnect(void)
+{
+    net_service_disconnect();
+}
+
+void wifi_data_get_status(wifi_data_status_t *out)
+{
+    net_status_t src;
+
+    if (out == NULL) {
+        return;
+    }
+    net_service_get_status(&src);
+    memset(out, 0, sizeof(*out));
+    out->state = map_wifi_state(src.state);
+    out->fail = map_wifi_fail(src.fail);
+    strlcpy(out->ssid, src.ssid, sizeof(out->ssid));
 }
 
 #endif /* !DASHBOARD_DATA_MOCK */

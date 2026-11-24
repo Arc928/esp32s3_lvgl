@@ -11,7 +11,6 @@
  */
 
 #include "gallery_view.h"
-#include "gui_guider.h"
 #include "dashboard_theme.h"
 #include "machine_list.h"
 #include "ui_common.h"

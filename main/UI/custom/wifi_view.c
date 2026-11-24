@@ -21,7 +21,7 @@
 #include <string.h>
 
 #include "wifi_view.h"
-#include "net_service.h"
+#include "dashboard_data.h"
 #include "dashboard_theme.h"
 #include "ui_common.h"
 
@@ -122,19 +122,19 @@ static struct {
     lv_obj_t *eye_label;
     lv_obj_t *message;
     lv_obj_t *keyboard;
-    char target_ssid[NET_SSID_MAX_LEN + 1];
+    char target_ssid[WIFI_DATA_SSID_MAX_LEN + 1];
     bool sheet_open;
     bool sheet_connecting;
 
     /* Data */
     lv_timer_t *timer;
-    net_ap_t aps[NET_SCAN_MAX_APS];
+    wifi_data_ap_t aps[WIFI_DATA_SCAN_MAX_APS];
     size_t ap_count;
     bool scanning;
     const char *hint;                           /* shown instead of the list while it is empty */
-    net_status_t status;                        /* as last drawn */
+    wifi_data_status_t status;                  /* as last drawn */
     bool status_valid;
-    char connected_ssid[NET_SSID_MAX_LEN + 1];  /* row marked as connected, "" if none */
+    char connected_ssid[WIFI_DATA_SSID_MAX_LEN + 1];  /* row marked as connected, "" if none */
 } s;
 
 /**********************
@@ -168,12 +168,12 @@ static lv_obj_t *button_label(lv_obj_t *button)
     return lv_obj_get_child(button, 0);
 }
 
-static const char *fail_text(net_fail_t fail)
+static const char *fail_text(wifi_data_fail_t fail)
 {
     switch(fail) {
-        case NET_FAIL_WRONG_PASSWORD: return STR_WRONG_PASSWORD;
-        case NET_FAIL_NOT_FOUND:      return STR_NOT_FOUND;
-        default:                      return STR_OTHER_ERROR;
+        case WIFI_DATA_FAIL_WRONG_PASSWORD: return STR_WRONG_PASSWORD;
+        case WIFI_DATA_FAIL_NOT_FOUND:      return STR_NOT_FOUND;
+        default:                            return STR_OTHER_ERROR;
     }
 }
 
@@ -217,7 +217,7 @@ static void init_row_styles(void)
     s_styles_ready = true;
 }
 
-static bool is_connected_row(const net_ap_t *ap)
+static bool is_connected_row(const wifi_data_ap_t *ap)
 {
     return s.connected_ssid[0] != '\0' && strcmp(ap->ssid, s.connected_ssid) == 0;
 }
@@ -232,7 +232,7 @@ static void on_row_draw(lv_event_t *e)
     uint32_t index = (uint32_t)(uintptr_t)lv_event_get_user_data(e);
     lv_layer_t *layer = lv_event_get_layer(e);
     lv_obj_t *row = lv_event_get_target_obj(e);
-    const net_ap_t *ap;
+    const wifi_data_ap_t *ap;
     bool connected;
     bool usable;
     lv_area_t box;
@@ -249,7 +249,7 @@ static void on_row_draw(lv_event_t *e)
     }
     ap = &s.aps[index];
     connected = is_connected_row(ap);
-    usable = (ap->auth != NET_AUTH_UNSUPPORTED);
+    usable = (ap->auth != WIFI_DATA_AUTH_UNSUPPORTED);
     lv_obj_get_coords(row, &box);
 
     /* Network name */
@@ -268,8 +268,8 @@ static void on_row_draw(lv_event_t *e)
     label.font = DASH_FONT_SMALL;
     label.color = lv_color_hex(connected ? DASH_COLOR_OK : DASH_COLOR_MUTED);
     label.text = connected ? STR_CONNECTED :
-                 ap->auth == NET_AUTH_OPEN ? STR_OPEN :
-                 ap->auth == NET_AUTH_PSK ? STR_SECURED : STR_UNSUPPORTED;
+                 ap->auth == WIFI_DATA_AUTH_OPEN ? STR_OPEN :
+                 ap->auth == WIFI_DATA_AUTH_PSK ? STR_SECURED : STR_UNSUPPORTED;
     label.align = LV_TEXT_ALIGN_RIGHT;
     line_h = lv_font_get_line_height(label.font);
     area.x2 = box.x2 - ROW_PAD - SIGNAL_W - CAPTION_GAP;
@@ -296,12 +296,12 @@ static void on_row_draw(lv_event_t *e)
 
 static void create_row(uint32_t index)
 {
-    const net_ap_t *ap = &s.aps[index];
+    const wifi_data_ap_t *ap = &s.aps[index];
     lv_obj_t *row = ui_create_box(s.list);
 
     lv_obj_add_style(row, &s_row_style, LV_PART_MAIN);
     lv_obj_add_event_cb(row, on_row_draw, LV_EVENT_DRAW_MAIN_END, (void *)(uintptr_t)index);
-    if(ap->auth != NET_AUTH_UNSUPPORTED && !is_connected_row(ap)) {
+    if(ap->auth != WIFI_DATA_AUTH_UNSUPPORTED && !is_connected_row(ap)) {
         ui_set_clickable(row, true);
         lv_obj_add_style(row, &s_row_pressed_style, LV_PART_MAIN | LV_STATE_PRESSED);
         lv_obj_add_event_cb(row, on_row_clicked, LV_EVENT_CLICKED, (void *)(uintptr_t)index);
@@ -339,7 +339,7 @@ static void update_scan_button(void)
 
 static void start_scan(void)
 {
-    esp_err_t err;
+    wifi_data_err_t err;
 
     if(s.scanning) {
         return;
@@ -350,20 +350,22 @@ static void start_scan(void)
     s.hint = NULL;
     rebuild_list(false);
 
-    err = net_service_scan_start();
-    if(err != ESP_OK) {
+    err = wifi_data_scan_start();
+    if(err != WIFI_DATA_OK) {
         s.scanning = false;
-        if(err == ESP_ERR_NO_MEM) {
-            s.hint = STR_NO_MEMORY;
-        }
-        else if(err == ESP_ERR_INVALID_STATE) {
-            net_status_t status;
-
-            net_service_get_status(&status);
-            s.hint = (status.state == NET_STATE_CONNECTING) ? STR_BUSY : STR_NOT_READY;
-        }
-        else {
-            s.hint = STR_SCAN_FAILED;
+        switch(err) {
+            case WIFI_DATA_ERR_NO_MEM:
+                s.hint = STR_NO_MEMORY;
+                break;
+            case WIFI_DATA_ERR_BUSY:
+                s.hint = STR_BUSY;
+                break;
+            case WIFI_DATA_ERR_NOT_READY:
+                s.hint = STR_NOT_READY;
+                break;
+            default:
+                s.hint = STR_SCAN_FAILED;
+                break;
         }
         rebuild_list(false);
     }
@@ -380,9 +382,9 @@ static void set_password_visible(bool visible)
     ui_set_text(s.eye_label, visible ? LV_SYMBOL_EYE_CLOSE : LV_SYMBOL_EYE_OPEN);
 }
 
-static void open_sheet(const net_ap_t *ap)
+static void open_sheet(const wifi_data_ap_t *ap)
 {
-    char title[sizeof(STR_CONNECT_TO) + NET_SSID_MAX_LEN];
+    char title[sizeof(STR_CONNECT_TO) + WIFI_DATA_SSID_MAX_LEN];
 
     lv_snprintf(s.target_ssid, sizeof(s.target_ssid), "%s", ap->ssid);
     lv_snprintf(title, sizeof(title), STR_CONNECT_TO "%s", ap->ssid);
@@ -427,11 +429,11 @@ static void submit_password(void)
     if(s.sheet_connecting) {
         return;
     }
-    if(len < NET_PASSWORD_MIN_LEN) {
+    if(len < WIFI_DATA_PASS_MIN_LEN) {
         show_message(STR_PASSWORD_LEN, DASH_COLOR_DANGER);
         return;
     }
-    if(net_service_connect(s.target_ssid, password) == ESP_OK) {
+    if(wifi_data_connect(s.target_ssid, password) == WIFI_DATA_OK) {
         s.sheet_connecting = true;
         show_message(STR_CONNECTING, DASH_COLOR_ACCENT);
     }
@@ -443,7 +445,7 @@ static void submit_password(void)
 static void cancel_sheet(void)
 {
     if(s.sheet_connecting) {
-        net_service_disconnect();
+        wifi_data_disconnect();
     }
     close_sheet();
 }
@@ -481,28 +483,28 @@ static void on_keyboard_event(lv_event_t *e)
 /**********************
  *   STATUS
  **********************/
-static void draw_status(const net_status_t *st)
+static void draw_status(const wifi_data_status_t *st)
 {
-    char detail[NET_SSID_MAX_LEN + 32];
+    char detail[WIFI_DATA_SSID_MAX_LEN + 32];
     const char *state_text = STR_NOT_CONNECTED;
     uint32_t state_color = DASH_COLOR_MUTED;
     bool show_button = false;
 
     detail[0] = '\0';
     switch(st->state) {
-        case NET_STATE_CONNECTED:
+        case WIFI_DATA_STATE_CONNECTED:
             state_text = STR_CONNECTED;
             state_color = DASH_COLOR_OK;
             show_button = true;
             lv_snprintf(detail, sizeof(detail), "%s", st->ssid);
             break;
-        case NET_STATE_CONNECTING:
+        case WIFI_DATA_STATE_CONNECTING:
             state_text = STR_CONNECTING;
             state_color = DASH_COLOR_ACCENT;
             show_button = true;
             lv_snprintf(detail, sizeof(detail), "%s", st->ssid);
             break;
-        case NET_STATE_FAILED:
+        case WIFI_DATA_STATE_FAILED:
             state_text = STR_FAILED;
             state_color = DASH_COLOR_DANGER;
             lv_snprintf(detail, sizeof(detail), "%s - %s", st->ssid, fail_text(st->fail));
@@ -514,20 +516,20 @@ static void draw_status(const net_status_t *st)
     ui_set_text(s.status_state, state_text);
     ui_set_text_color(s.status_state, state_color);
     ui_set_text(s.status_detail, detail);
-    ui_set_text(s.status_button_label, st->state == NET_STATE_CONNECTING ? STR_CANCEL : STR_DISCONNECT);
+    ui_set_text(s.status_button_label, st->state == WIFI_DATA_STATE_CONNECTING ? STR_CANCEL : STR_DISCONNECT);
     ui_set_hidden(s.status_button, !show_button);
 }
 
 static void on_status_button_clicked(lv_event_t *e)
 {
     LV_UNUSED(e);
-    net_service_disconnect();
+    wifi_data_disconnect();
 }
 
 /* Everything that follows the connection state and the scan, polled while the page is shown. */
 static void on_tick(lv_timer_t *timer)
 {
-    net_status_t st;
+    wifi_data_status_t st;
     const char *connected = "";
     bool changed;
 
@@ -536,19 +538,19 @@ static void on_tick(lv_timer_t *timer)
     /* Scan result */
     if(s.scanning) {
         size_t count = 0;
-        net_scan_state_t scan = net_service_scan_get(s.aps, NET_SCAN_MAX_APS, &count);
+        wifi_data_scan_state_t scan = wifi_data_scan_get(s.aps, WIFI_DATA_SCAN_MAX_APS, &count);
 
-        if(scan == NET_SCAN_DONE || scan == NET_SCAN_FAILED) {
+        if(scan == WIFI_DATA_SCAN_DONE || scan == WIFI_DATA_SCAN_FAILED) {
             s.scanning = false;
             s.ap_count = count;     /* 0 when the scan failed */
-            s.hint = (scan == NET_SCAN_FAILED) ? STR_SCAN_FAILED : NULL;
+            s.hint = (scan == WIFI_DATA_SCAN_FAILED) ? STR_SCAN_FAILED : NULL;
             update_scan_button();
             rebuild_list(false);
         }
     }
 
     /* Connection state */
-    net_service_get_status(&st);
+    wifi_data_get_status(&st);
     changed = !s.status_valid || st.state != s.status.state || st.fail != s.status.fail ||
               strcmp(st.ssid, s.status.ssid) != 0;
     if(changed) {
@@ -556,7 +558,7 @@ static void on_tick(lv_timer_t *timer)
         s.status_valid = true;
         draw_status(&st);
 
-        if(st.state == NET_STATE_CONNECTED) {
+        if(st.state == WIFI_DATA_STATE_CONNECTED) {
             connected = st.ssid;
         }
         if(strcmp(connected, s.connected_ssid) != 0) {
@@ -570,14 +572,14 @@ static void on_tick(lv_timer_t *timer)
     /* Result of the password the user just typed */
     if(s.sheet_open && s.sheet_connecting) {
         switch(st.state) {
-            case NET_STATE_CONNECTED:
+            case WIFI_DATA_STATE_CONNECTED:
                 close_sheet();
                 break;
-            case NET_STATE_FAILED:
+            case WIFI_DATA_STATE_FAILED:
                 s.sheet_connecting = false;
                 show_message(fail_text(st.fail), DASH_COLOR_DANGER);
                 break;
-            case NET_STATE_DISCONNECTED:
+            case WIFI_DATA_STATE_DISCONNECTED:
                 s.sheet_connecting = false;
                 show_message("", DASH_COLOR_MUTED);
                 break;
@@ -590,18 +592,18 @@ static void on_tick(lv_timer_t *timer)
 static void on_row_clicked(lv_event_t *e)
 {
     uint32_t index = (uint32_t)(uintptr_t)lv_event_get_user_data(e);
-    const net_ap_t *ap;
+    const wifi_data_ap_t *ap;
 
     if(index >= s.ap_count) {
         return;
     }
     ap = &s.aps[index];
-    if(ap->auth == NET_AUTH_PSK) {
+    if(ap->auth == WIFI_DATA_AUTH_PSK) {
         open_sheet(ap);
     }
-    else if(ap->auth == NET_AUTH_OPEN) {
+    else if(ap->auth == WIFI_DATA_AUTH_OPEN) {
         /* The status card follows on the next tick. */
-        net_service_connect(ap->ssid, NULL);
+        wifi_data_connect(ap->ssid, NULL);
     }
 }
 
@@ -753,7 +755,7 @@ static void build_textarea(void)
     lv_obj_set_style_border_color(ta, lv_color_hex(DASH_COLOR_ACCENT), LV_PART_CURSOR);
 
     lv_textarea_set_one_line(ta, true);
-    lv_textarea_set_max_length(ta, NET_PASSWORD_MAX_LEN);
+    lv_textarea_set_max_length(ta, WIFI_DATA_PASS_MAX_LEN);
     lv_textarea_set_placeholder_text(ta, STR_PASSWORD);
     lv_textarea_set_password_mode(ta, true);
 

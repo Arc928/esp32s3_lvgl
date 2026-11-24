@@ -3,7 +3,8 @@
  * asking for the password on an on-screen keyboard.
  *
  * Opened from the Wi-Fi icon in the status bar of the other pages. The data
- * comes from net_service; this file only draws and calls it.
+ * comes through dashboard_data.h (backed by net_service on the board); this
+ * file only draws and calls it.
  */
 
 #ifndef WIFI_VIEW_H

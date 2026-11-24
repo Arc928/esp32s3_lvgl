@@ -13,11 +13,9 @@
 extern "C" {
 #endif
 
-#include "gui_guider.h"
-
-void custom_init(lv_ui *ui);
+void custom_init(void);
 
 #ifdef __cplusplus
 }
 #endif
-#endif /* EVENT_CB_H_ */
+#endif /* __CUSTOM_H_ */

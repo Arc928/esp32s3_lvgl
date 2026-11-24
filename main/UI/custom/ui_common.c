@@ -254,14 +254,23 @@ void ui_set_text_color(lv_obj_t *label, uint32_t color)
     lv_obj_set_style_text_color(label, c, LV_PART_MAIN);
 }
 
+static bool safe_localtime(time_t sec, struct tm *out)
+{
+#if defined(_WIN32)
+    return localtime_s(out, &sec) == 0;
+#else
+    return localtime_r(&sec, out) != NULL;
+#endif
+}
+
 void ui_update_clock(lv_obj_t *label)
 {
     char buf[16];
     time_t now = time(NULL);
-    const struct tm *local = now >= CLOCK_VALID_AFTER ? localtime(&now) : NULL;
+    struct tm local;
 
-    if(local != NULL) {
-        lv_snprintf(buf, sizeof(buf), "%02d:%02d:%02d", local->tm_hour, local->tm_min, local->tm_sec);
+    if(now >= CLOCK_VALID_AFTER && safe_localtime(now, &local)) {
+        lv_snprintf(buf, sizeof(buf), "%02d:%02d:%02d", local.tm_hour, local.tm_min, local.tm_sec);
     }
     else {
         unsigned long up = (unsigned long)(lv_tick_get() / 1000U);

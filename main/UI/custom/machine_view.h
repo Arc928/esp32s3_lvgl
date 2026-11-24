@@ -10,7 +10,7 @@
 extern "C" {
 #endif
 
-#include "gui_guider.h"
+#include "lvgl.h"
 #include "dashboard_data.h"
 
 /* Called when the user taps "返回". Swipes are handled in custom.c. */
@@ -22,12 +22,9 @@ typedef void (*machine_view_wifi_cb_t)(void);
 /* Called when the user taps the status-bar MQTT indicator pill (may be NULL). */
 typedef void (*machine_view_mqtt_cb_t)(void);
 
-/*
- * Builds the page on ui->screen. Keeps the GUI Guider status bar, clock and
- * Wi-Fi icon, and removes the unused GUI Guider IMU panel and LED.
- */
-void machine_view_create(lv_ui *ui, machine_view_back_cb_t on_back, machine_view_wifi_cb_t on_wifi,
-                         machine_view_mqtt_cb_t on_mqtt);
+/* Builds the detail page on a new screen and returns that screen (not loaded). */
+lv_obj_t *machine_view_create(machine_view_back_cb_t on_back, machine_view_wifi_cb_t on_wifi,
+                              machine_view_mqtt_cb_t on_mqtt);
 
 /* Shows the photo and name of a machine (index from machine_list.h). */
 void machine_view_set_machine(uint32_t machine_index);

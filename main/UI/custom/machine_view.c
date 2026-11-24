@@ -164,6 +164,7 @@ static const cmd_spec_t k_cmd_specs[CMD_TILE_COUNT] = {
 
 static struct {
     bool created;
+    lv_obj_t *screen;
     machine_view_back_cb_t on_back;
     machine_view_wifi_cb_t on_wifi;
     machine_view_mqtt_cb_t on_mqtt;
@@ -281,6 +282,15 @@ static void format_age(uint32_t received_tick_ms, char *buf, size_t size)
     }
 }
 
+static bool safe_localtime(time_t sec, struct tm *out)
+{
+#if defined(_WIN32)
+    return localtime_s(out, &sec) == 0;
+#else
+    return localtime_r(&sec, out) != NULL;
+#endif
+}
+
 static void format_cmd_time(char *buf, size_t size)
 {
     char age_buf[24];
@@ -288,10 +298,10 @@ static void format_cmd_time(char *buf, size_t size)
     format_age(s_view.cmd.received_tick_ms, age_buf, sizeof(age_buf));
     if(s_view.cmd.timestamp_ms >= VALID_EPOCH_MS) {
         time_t sec = (time_t)(s_view.cmd.timestamp_ms / 1000LL);
-        const struct tm *lt = localtime(&sec);
-        if(lt != NULL) {
+        struct tm lt;
+        if(safe_localtime(sec, &lt)) {
             lv_snprintf(buf, size, "%02d:%02d:%02d · %s",
-                        lt->tm_hour, lt->tm_min, lt->tm_sec, age_buf);
+                        lt.tm_hour, lt.tm_min, lt.tm_sec, age_buf);
             return;
         }
     }
@@ -614,25 +624,6 @@ static void on_tile_clicked(lv_event_t *e)
 /**********************
  *   BUILD: STATUS BAR
  **********************/
-static void remove_guider_unused_widgets(lv_ui *ui)
-{
-    if(ui->screen_IMU != NULL) {
-        lv_obj_delete(ui->screen_IMU);
-        ui->screen_IMU = NULL;
-        ui->screen_imu_status = NULL;
-        ui->screen_pitch = NULL;
-        ui->screen_pitch_data = NULL;
-        ui->screen_roll = NULL;
-        ui->screen_roll_data = NULL;
-        ui->screen_yaw = NULL;
-        ui->screen_yaw_data = NULL;
-    }
-    if(ui->screen_led_1 != NULL) {
-        lv_obj_delete(ui->screen_led_1);
-        ui->screen_led_1 = NULL;
-    }
-}
-
 static void build_back_button(lv_obj_t *bar)
 {
     lv_obj_t *button = ui_create_box(bar);
@@ -659,12 +650,12 @@ static void build_back_button(lv_obj_t *bar)
     ui_create_label(row, DASH_FONT_BODY, DASH_COLOR_TEXT, "返回");
 }
 
-static void build_status_bar(lv_ui *ui)
+static void build_status_bar(lv_obj_t *screen)
 {
-    lv_obj_t *bar = ui->screen_StatusBar;
+    lv_obj_t *bar = ui_create_box(screen);
     lv_obj_t *title;
+    lv_obj_t *wifi;
 
-    ui_make_static(bar);
     ui_style_status_bar(bar);
 
     build_back_button(bar);
@@ -678,17 +669,14 @@ static void build_status_bar(lv_ui *ui)
 
     s_view.mqtt_pill = ui_create_mqtt_pill(bar, s_view.on_mqtt != NULL ? on_mqtt_clicked : NULL);
 
-    s_view.clock = ui->screen_time;
-    lv_obj_set_size(s_view.clock, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-    lv_obj_set_style_text_font(s_view.clock, DASH_FONT_BODY, LV_PART_MAIN);
-    lv_obj_set_style_text_color(s_view.clock, lv_color_hex(DASH_COLOR_TEXT), LV_PART_MAIN);
-    lv_obj_set_style_text_align(s_view.clock, LV_TEXT_ALIGN_LEFT, LV_PART_MAIN);
-    lv_label_set_text(s_view.clock, "--:--:--");
+    s_view.clock = ui_create_label(bar, DASH_FONT_BODY, DASH_COLOR_TEXT, "--:--:--");
     lv_obj_align(s_view.clock, LV_ALIGN_RIGHT_MID, -44, 0);
 
-    ui_tint_icon(ui->screen_wifi, DASH_COLOR_TEXT);
-    lv_obj_align(ui->screen_wifi, LV_ALIGN_RIGHT_MID, -4, 0);
-    ui_make_icon_button(ui->screen_wifi, on_wifi_clicked);
+    wifi = lv_image_create(bar);
+    lv_image_set_src(wifi, &_wifi1_RGB565A8_30x30);
+    ui_tint_icon(wifi, DASH_COLOR_TEXT);
+    lv_obj_align(wifi, LV_ALIGN_RIGHT_MID, -4, 0);
+    ui_make_icon_button(wifi, on_wifi_clicked);
 }
 
 /**********************
@@ -900,33 +888,30 @@ static void build_hero_overlay(lv_obj_t *screen)
 /**********************
  *   PUBLIC API
  **********************/
-void machine_view_create(lv_ui *ui, machine_view_back_cb_t on_back, machine_view_wifi_cb_t on_wifi,
-                         machine_view_mqtt_cb_t on_mqtt)
+lv_obj_t *machine_view_create(machine_view_back_cb_t on_back, machine_view_wifi_cb_t on_wifi,
+                              machine_view_mqtt_cb_t on_mqtt)
 {
-    lv_obj_t *screen = ui->screen;
+    lv_obj_t *screen;
 
     if(s_view.created) {
-        return;
+        return s_view.screen;
     }
     memset(&s_view, 0, sizeof(s_view));
+    screen = ui_create_screen();
+    s_view.screen = screen;
     s_view.active_tile = -1;
     s_view.on_back = on_back;
     s_view.on_wifi = on_wifi;
     s_view.on_mqtt = on_mqtt;
 
-    /* GUI Guider drew this screen at 800 x 480. */
-    lv_obj_set_size(screen, UI_SCREEN_W, UI_SCREEN_H);
-    lv_obj_set_style_bg_color(screen, lv_color_hex(DASH_COLOR_BG), LV_PART_MAIN);
-    ui_set_scrollable(screen, false);
-    remove_guider_unused_widgets(ui);
-
-    build_status_bar(ui);
+    build_status_bar(screen);
     build_machine_panel(screen);
     build_commands_panel(screen);
     build_hero_overlay(screen);
 
     s_view.created = true;
     machine_view_set_machine(0);
+    return screen;
 }
 
 void machine_view_set_machine(uint32_t machine_index)

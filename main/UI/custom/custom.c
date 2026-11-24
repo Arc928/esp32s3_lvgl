@@ -8,7 +8,7 @@
 */
 
 /*
- * Entry point called after setup_ui().
+ * UI entry point called from app_main() under the LVGL lock.
  *
  * The home page (the machine gallery) and the detail page (machine photo on the
  * left half, 8 MQTT control commands on the right half) are the left and right
@@ -112,10 +112,15 @@ static void handle_incoming_cmd(void)
 static void refresh(lv_timer_t *timer)
 {
     bool mqtt_ok = mqtt_data_is_connected();
+    lv_obj_t *active = lv_screen_active();
 
     LV_UNUSED(timer);
-    gallery_view_update(mqtt_ok);
-    machine_view_update(NULL, NULL, mqtt_ok);
+    if(active == s_home) {
+        gallery_view_update(mqtt_ok);
+    }
+    else if(active == s_detail) {
+        machine_view_update(NULL, NULL, mqtt_ok);
+    }
     handle_incoming_cmd();
 }
 
@@ -152,6 +157,7 @@ static void go_home(void)
     if(page_switching() || lv_screen_active() != s_detail) {
         return;
     }
+    gallery_view_update(mqtt_data_is_connected());
     lv_screen_load_anim(s_home, ANIM_BACK, PAGE_SWITCH_MS, 0, false);
 }
 
@@ -173,6 +179,12 @@ static void close_wifi(void)
         return;
     }
     wifi_view_leave();
+    if(s_wifi_return == s_home) {
+        gallery_view_update(mqtt_data_is_connected());
+    }
+    else if(s_wifi_return == s_detail) {
+        machine_view_update(NULL, NULL, mqtt_data_is_connected());
+    }
     lv_screen_load_anim(s_wifi_return, ANIM_BACK, PAGE_SWITCH_MS, 0, false);
 }
 
@@ -206,7 +218,7 @@ static void on_home_gesture(lv_event_t *e)
     }
 }
 
-void custom_init(lv_ui *ui)
+void custom_init(void)
 {
 #if DASHBOARD_DATA_MOCK
     machine_view_mqtt_cb_t mqtt_cb = on_mock_mqtt_pill_clicked;
@@ -215,8 +227,7 @@ void custom_init(lv_ui *ui)
 #endif
 
     mqtt_data_init();
-    machine_view_create(ui, go_home, open_wifi, mqtt_cb);
-    s_detail = ui->screen;
+    s_detail = machine_view_create(go_home, open_wifi, mqtt_cb);
     lv_obj_add_event_cb(s_detail, on_detail_gesture, LV_EVENT_GESTURE, NULL);
 
     s_wifi = wifi_view_create(close_wifi);

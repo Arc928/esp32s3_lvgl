@@ -248,4 +248,71 @@ bool mqtt_data_get_device_cmd(uint8_t device_id, mqtt_cmd_data_t *out)
     return true;
 }
 
+static const wifi_data_ap_t k_mock_aps[] = {
+    { "Greenhouse-5G", -48, WIFI_DATA_AUTH_PSK },
+    { "FarmLab-WiFi",  -62, WIFI_DATA_AUTH_PSK },
+    { "Field-Guest",   -74, WIFI_DATA_AUTH_OPEN },
+};
+
+static wifi_data_status_t s_mock_wifi_status = {
+    .state = WIFI_DATA_STATE_CONNECTED,
+    .fail = WIFI_DATA_FAIL_NONE,
+    .ssid = "Greenhouse-5G",
+};
+static bool s_mock_wifi_scanned;
+
+wifi_data_err_t wifi_data_scan_start(void)
+{
+    s_mock_wifi_scanned = true;
+    return WIFI_DATA_OK;
+}
+
+wifi_data_scan_state_t wifi_data_scan_get(wifi_data_ap_t *aps, size_t max, size_t *count)
+{
+    size_t total = sizeof(k_mock_aps) / sizeof(k_mock_aps[0]);
+    size_t n = 0;
+
+    if(!s_mock_wifi_scanned) {
+        if(count != NULL) {
+            *count = 0;
+        }
+        return WIFI_DATA_SCAN_IDLE;
+    }
+    n = (total < max) ? total : max;
+    if(aps != NULL) {
+        memcpy(aps, k_mock_aps, n * sizeof(*aps));
+    }
+    if(count != NULL) {
+        *count = n;
+    }
+    return WIFI_DATA_SCAN_DONE;
+}
+
+wifi_data_err_t wifi_data_connect(const char *ssid, const char *password)
+{
+    LV_UNUSED(password);
+    if(ssid == NULL || ssid[0] == '\0') {
+        return WIFI_DATA_ERR_INVALID_ARG;
+    }
+    s_mock_wifi_status.state = WIFI_DATA_STATE_CONNECTED;
+    s_mock_wifi_status.fail = WIFI_DATA_FAIL_NONE;
+    copy_str(s_mock_wifi_status.ssid, sizeof(s_mock_wifi_status.ssid), ssid);
+    return WIFI_DATA_OK;
+}
+
+void wifi_data_disconnect(void)
+{
+    s_mock_wifi_status.state = WIFI_DATA_STATE_DISCONNECTED;
+    s_mock_wifi_status.fail = WIFI_DATA_FAIL_NONE;
+    s_mock_wifi_status.ssid[0] = '\0';
+}
+
+void wifi_data_get_status(wifi_data_status_t *out)
+{
+    if(out == NULL) {
+        return;
+    }
+    *out = s_mock_wifi_status;
+}
+
 #endif /* DASHBOARD_DATA_MOCK */
