@@ -1,7 +1,7 @@
 /*
  * Machine detail page (800 x 480 base, scaled).
  *
- *  +-- ‹ 返回 ------------- 06  多功能作业车 ------ ● MQTT  clock  wifi --+
+ *  +-- ‹ 返回 ------------- 06  电动多功能作业底盘 ------ ● MQTT  clock  wifi --+
  *  | 设备                       #06 | 远程控制指令        10:51:05 · 刚刚 |
  *  |                                | +---------------+ +---------------+ |
  *  |                                | | ▶  开始作业    | | ■  停止作业    | |
@@ -10,7 +10,7 @@
  *  |                                | +---------------+ +---------------+ |
  *  |                                | | ↑  向前行驶    | | ↓  向后行驶    | |
  *  |                                | +---------------+ +---------------+ |
- *  |          多功能作业车           | | ←  向左行驶    | | →  向右行驶    | |
+ *  |          电动多功能作业底盘           | | ←  向左行驶    | | →  向右行驶    | |
  *  +--------------------------------+-------------------------------------+
  *
  * Left half: agricultural machine photo and name.
@@ -660,7 +660,7 @@ static void build_status_bar(lv_obj_t *screen)
 
     build_back_button(bar);
 
-    /* "06  多功能作业车", filled in by machine_view_set_machine(). */
+    /* "06  电动多功能作业底盘", filled in by machine_view_set_machine(). */
     title = ui_create_row(bar, 0, 0, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(title, UI_SU(8), LV_PART_MAIN);
     lv_obj_align(title, LV_ALIGN_CENTER, 0, 0);
@@ -813,7 +813,7 @@ static void build_hero_overlay(lv_obj_t *screen)
     lv_obj_set_size(s_view.hero_content, HERO_W, HERO_H);
     lv_obj_center(s_view.hero_content);
 
-    /* Header row: "#06  多功能作业车" on left, live reception time on right */
+    /* Header row: "#06  电动多功能作业底盘" on left, live reception time on right */
     top_left = ui_create_row(s_view.hero_content, 0, 0, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(top_left, UI_SU(10), LV_PART_MAIN);
     lv_obj_align(top_left, LV_ALIGN_TOP_LEFT, HERO_PAD_X, UI_SY(20));
