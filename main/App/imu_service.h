@@ -2,10 +2,7 @@
  * imu_service.h
  * 姿态服务 - 负责 MPU6050 的初始化、后台采集、掉线检测和最新数据缓存
  *
- * 数据有两种取法：
- *  - 定时读取：imu_service_get_latest()，适合 UI 这类按自己节奏刷新的模块
- *  - 订阅事件：APP_EVENTS / APP_IMU_DATA_UPDATED，适合需要每一帧数据的模块（如 MQTT 上传）
- *
+ * 上层通过 imu_service_get_latest() 读取最新姿态快照（线程安全），不向默认事件循环高频投递。
  * 传感器没接、初始化失败或运行中掉线时，服务进入离线状态并发布 APP_SENSOR_ERROR，
  * 之后在后台定期重新初始化，传感器恢复后自动回到在线状态，整个过程不会重启设备。
  */
@@ -16,7 +13,13 @@
 #include <stdbool.h>
 #include "esp_err.h"
 #include "driver/i2c_master.h"
-#include "app_event.h"
+
+/* 姿态数据（单位：度） */
+typedef struct {
+    float pitch;
+    float roll;
+    float yaw;
+} app_imu_data_t;
 
 typedef enum {
     IMU_STATUS_STARTING = 0,    /* 正在初始化，还没有数据 */

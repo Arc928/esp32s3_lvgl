@@ -15,6 +15,7 @@
 #error "mqtt_secrets.h 缺少 MQTT_GHCODE 或 MQTT_GHCHECK，请参考 mqtt_secrets.h.example 补齐"
 #endif
 
+#include <stdatomic.h>
 #include <stdio.h>
 #include <string.h>
 #include "freertos/FreeRTOS.h"
@@ -39,7 +40,7 @@
 
 static esp_mqtt_client_handle_t s_client = NULL;
 static SemaphoreHandle_t s_lock = NULL;
-static volatile bool s_connected = false;   /* 只在 esp-mqtt 任务里写 */
+static atomic_bool s_connected = false;     /* 在 esp-mqtt 任务里写，其他任务并发读 */
 static bool s_started = false;              /* 只在默认事件循环任务里读写 */
 
 static char s_client_id[24];                /* MQTT 3.1.1 要求 broker 至少支持 23 个字符 */
@@ -326,7 +327,7 @@ static void on_mqtt_event(void *arg, esp_event_base_t base, int32_t id, void *da
 
     switch ((esp_mqtt_event_id_t)id) {
     case MQTT_EVENT_CONNECTED: {
-        s_connected = true;
+        atomic_store_explicit(&s_connected, true, memory_order_release);
         reset_rx();
         int msg_id = esp_mqtt_client_subscribe(s_client, s_topic_control, MQTT_CONTROL_SUB_QOS);
         if (msg_id < 0) {
@@ -341,8 +342,7 @@ static void on_mqtt_event(void *arg, esp_event_base_t base, int32_t id, void *da
     case MQTT_EVENT_DISCONNECTED:
         reset_rx();
         /* 每次重连失败都会收到这个事件，只在状态变化时发事件，避免刷屏 */
-        if (s_connected) {
-            s_connected = false;
+        if (atomic_exchange_explicit(&s_connected, false, memory_order_acq_rel)) {
             app_event_publish_mqtt_status(false);
         }
         break;
@@ -456,7 +456,7 @@ fail:
 
 bool mqtt_service_is_connected(void)
 {
-    return s_connected;
+    return atomic_load_explicit(&s_connected, memory_order_acquire);
 }
 
 bool mqtt_service_get_last_control(app_device_control_t *out)

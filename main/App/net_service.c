@@ -4,12 +4,14 @@
 #include "wifi_secrets.h"
 #endif
 
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
+#include "esp_check.h"
 #include "esp_wifi.h"
 #include "esp_event.h"
 #include "esp_netif.h"
@@ -26,13 +28,19 @@
 #define SCAN_MIN_FREE_INTERNAL  (12 * 1024)
 
 /* 状态由三方访问：Wi-Fi/IP 事件任务、调用 API 的任务（LVGL）、持久化任务，全部用 s_lock 保护。
- * 持锁期间不调用 esp_wifi_*，避免和 Wi-Fi 任务互相等待。 */
+ * 持 s_lock 期间不调用 esp_wifi_*，避免和 Wi-Fi 任务互相等待。
+ * s_wifi_cfg_lock 专门串行化 net_service_connect / net_service_disconnect / persist_task 对
+ * esp_wifi_set_storage / esp_wifi_set_config 的调用（绝不在事件回调里获取）；锁序固定为
+ * s_wifi_cfg_lock -> s_lock。 */
 static SemaphoreHandle_t s_lock;
-static volatile bool s_started;
+static SemaphoreHandle_t s_wifi_cfg_lock;
+static atomic_bool s_started;
+static esp_netif_t *s_sta_netif;
 
 static net_status_t s_status;
 static int s_retry_num;
 static int s_max_retry;
+static uint32_t s_connect_gen;          /* 连接代数，避免迟到的 persist_task 覆盖新连接的配置 */
 
 /* 用户新输入的凭据：连上之后才写进 NVS，连不上就丢掉，开机仍连回原来的网络 */
 static wifi_config_t s_pending_cfg;
@@ -80,36 +88,53 @@ static net_fail_t classify_reason(uint8_t reason)
     }
 }
 
-/* 事件任务的栈只有 2KB，写 NVS 放到单独的短任务里（和 time_service 的做法一样） */
+typedef struct {
+    wifi_config_t cfg;
+    uint32_t gen;
+} persist_req_t;
+
+/* 事件任务的栈只有 2KB，写 NVS 放到单独的短任务里；用 s_wifi_cfg_lock 和代数计数避免覆盖新连接 */
 static void persist_task(void *arg)
 {
-    wifi_config_t *cfg = arg;
-    esp_err_t err = esp_wifi_set_storage(WIFI_STORAGE_FLASH);
+    persist_req_t *req = arg;
 
-    if (err == ESP_OK) {
-        err = esp_wifi_set_config(WIFI_IF_STA, cfg);
-    }
-    if (err == ESP_OK) {
-        ESP_LOGI(TAG, "Saved credentials of \"%s\"", (const char *)cfg->sta.ssid);
+    xSemaphoreTake(s_wifi_cfg_lock, portMAX_DELAY);
+    lock();
+    bool still_current = (req->gen == s_connect_gen);
+    unlock();
+
+    if (still_current) {
+        esp_err_t err = esp_wifi_set_storage(WIFI_STORAGE_FLASH);
+        if (err == ESP_OK) {
+            err = esp_wifi_set_config(WIFI_IF_STA, &req->cfg);
+        }
+        if (err == ESP_OK) {
+            ESP_LOGI(TAG, "Saved credentials of \"%s\"", (const char *)req->cfg.sta.ssid);
+        } else {
+            ESP_LOGW(TAG, "Failed to save credentials: %s", esp_err_to_name(err));
+        }
     } else {
-        ESP_LOGW(TAG, "Failed to save credentials: %s", esp_err_to_name(err));
+        ESP_LOGI(TAG, "Skipped saving stale credentials of \"%s\"", (const char *)req->cfg.sta.ssid);
     }
-    memset(cfg, 0, sizeof(*cfg));
-    free(cfg);
+    xSemaphoreGive(s_wifi_cfg_lock);
+
+    memset(req, 0, sizeof(*req));
+    free(req);
     vTaskDelete(NULL);
 }
 
-static void persist_credentials(const wifi_config_t *cfg)
+static void persist_credentials(const wifi_config_t *cfg, uint32_t gen)
 {
-    wifi_config_t *copy = malloc(sizeof(*copy));
+    persist_req_t *req = malloc(sizeof(*req));
 
-    if (copy == NULL) {
+    if (req == NULL) {
         return;
     }
-    *copy = *cfg;
-    if (xTaskCreate(persist_task, "wifi_save", 4096, copy, 4, NULL) != pdPASS) {
-        memset(copy, 0, sizeof(*copy));
-        free(copy);
+    req->cfg = *cfg;
+    req->gen = gen;
+    if (xTaskCreate(persist_task, "wifi_save", 4096, req, 4, NULL) != pdPASS) {
+        memset(req, 0, sizeof(*req));
+        free(req);
     }
 }
 
@@ -134,6 +159,14 @@ static void on_sta_disconnected(const wifi_event_sta_disconnected_t *ev)
         /* 我们自己调用 esp_wifi_disconnect() 产生的事件 */
         unlock();
         return;
+    }
+    if (ev->ssid_len > 0 && s_status.ssid[0] != '\0') {
+        size_t cur_len = strlen(s_status.ssid);
+        if (ev->ssid_len != cur_len || memcmp(ev->ssid, s_status.ssid, cur_len) != 0) {
+            /* 切换网络时旧连接的迟到断开事件，忽略以免误消耗新网络的重试次数 */
+            unlock();
+            return;
+        }
     }
 
     switch (s_status.state) {
@@ -171,6 +204,7 @@ static void on_sta_disconnected(const wifi_event_sta_disconnected_t *ev)
 static void on_got_ip(const ip_event_got_ip_t *ev)
 {
     wifi_config_t to_save = { 0 };
+    uint32_t gen = 0;
     bool save;
 
     lock();
@@ -180,6 +214,7 @@ static void on_got_ip(const ip_event_got_ip_t *ev)
     save = s_persist_pending;
     if (save) {
         to_save = s_pending_cfg;
+        gen = s_connect_gen;
         s_persist_pending = false;
         memset(&s_pending_cfg, 0, sizeof(s_pending_cfg));
     }
@@ -187,7 +222,7 @@ static void on_got_ip(const ip_event_got_ip_t *ev)
 
     ESP_LOGI(TAG, "Got IP " IPSTR, IP2STR(&ev->ip_info.ip));
     if (save) {
-        persist_credentials(&to_save);
+        persist_credentials(&to_save, gen);
         memset(&to_save, 0, sizeof(to_save));
     }
 }
@@ -358,7 +393,11 @@ static bool load_boot_credentials(wifi_config_t *cfg)
     /* 低于 WPA2 的网络（含开放网络）一律不连，和之前的行为一致 */
     cfg->sta.threshold.authmode = (cfg->sta.password[0] != '\0') ? WIFI_AUTH_WPA2_PSK : WIFI_AUTH_OPEN;
     cfg->sta.sae_pwe_h2e = WPA3_SAE_PWE_BOTH;
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, cfg));
+    esp_err_t err = esp_wifi_set_config(WIFI_IF_STA, cfg);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to apply default Wi-Fi config: %s", esp_err_to_name(err));
+        return false;
+    }
     return true;
 #else
     return false;
@@ -367,27 +406,40 @@ static bool load_boot_credentials(wifi_config_t *cfg)
 
 /* ==================== 公开接口 ==================== */
 
-void net_service_start(void)
+esp_err_t net_service_start(void)
 {
+    if (atomic_load_explicit(&s_started, memory_order_acquire)) {
+        return ESP_OK;
+    }
+
+    esp_err_t ret = ESP_OK;
+    bool wifi_inited = false;
+    esp_event_handler_instance_t wifi_ev_inst = NULL;
+    esp_event_handler_instance_t ip_ev_inst = NULL;
     wifi_config_t boot_cfg;
 
-    if (s_started) {
-        return;
-    }
     s_lock = xSemaphoreCreateMutex();
-    configASSERT(s_lock != NULL);
+    ESP_GOTO_ON_FALSE(s_lock != NULL, ESP_ERR_NO_MEM, err, TAG, "no mem for state lock");
 
-    ESP_ERROR_CHECK(esp_netif_init());
-    esp_netif_create_default_wifi_sta();
+    s_wifi_cfg_lock = xSemaphoreCreateMutex();
+    ESP_GOTO_ON_FALSE(s_wifi_cfg_lock != NULL, ESP_ERR_NO_MEM, err, TAG, "no mem for config lock");
+
+    ESP_GOTO_ON_ERROR(esp_netif_init(), err, TAG, "esp_netif_init failed");
+    s_sta_netif = esp_netif_create_default_wifi_sta();
+    ESP_GOTO_ON_FALSE(s_sta_netif != NULL, ESP_ERR_NO_MEM, err, TAG, "failed to create default Wi-Fi STA netif");
 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+    ESP_GOTO_ON_ERROR(esp_wifi_init(&cfg), err, TAG, "esp_wifi_init failed");
+    wifi_inited = true;
 
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &event_handler, NULL, NULL));
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &event_handler, NULL, NULL));
+    ESP_GOTO_ON_ERROR(esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &event_handler, NULL, &wifi_ev_inst),
+                      err, TAG, "failed to register WIFI_EVENT");
+    ESP_GOTO_ON_ERROR(esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &event_handler, NULL, &ip_ev_inst),
+                      err, TAG, "failed to register IP_EVENT");
 
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+    ESP_GOTO_ON_ERROR(esp_wifi_set_mode(WIFI_MODE_STA), err, TAG, "esp_wifi_set_mode failed");
 
+    memset(&s_status, 0, sizeof(s_status));
     if (load_boot_credentials(&boot_cfg)) {
         /* 状态要在 esp_wifi_start() 之前设好：STA_START 事件里据此决定是否开始连接 */
         s_status.state = NET_STATE_CONNECTING;
@@ -399,14 +451,40 @@ void net_service_start(void)
     }
     memset(&boot_cfg, 0, sizeof(boot_cfg));
 
-    ESP_ERROR_CHECK(esp_wifi_start());
-    s_started = true;
+    ESP_GOTO_ON_ERROR(esp_wifi_start(), err, TAG, "esp_wifi_start failed");
+    atomic_store_explicit(&s_started, true, memory_order_release);
     ESP_LOGI(TAG, "Wi-Fi STA started");
+    return ESP_OK;
+
+err:
+    if (ip_ev_inst != NULL) {
+        (void)esp_event_handler_instance_unregister(IP_EVENT, IP_EVENT_STA_GOT_IP, ip_ev_inst);
+    }
+    if (wifi_ev_inst != NULL) {
+        (void)esp_event_handler_instance_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_ev_inst);
+    }
+    if (wifi_inited) {
+        (void)esp_wifi_deinit();
+    }
+    if (s_sta_netif != NULL) {
+        esp_netif_destroy_default_wifi(s_sta_netif);
+        s_sta_netif = NULL;
+    }
+    if (s_wifi_cfg_lock != NULL) {
+        vSemaphoreDelete(s_wifi_cfg_lock);
+        s_wifi_cfg_lock = NULL;
+    }
+    if (s_lock != NULL) {
+        vSemaphoreDelete(s_lock);
+        s_lock = NULL;
+    }
+    memset(&s_status, 0, sizeof(s_status));
+    return ret;
 }
 
 esp_err_t net_service_scan_start(void)
 {
-    if (!s_started) {
+    if (!atomic_load_explicit(&s_started, memory_order_acquire)) {
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -447,7 +525,7 @@ net_scan_state_t net_service_scan_get(net_ap_t *aps, size_t max, size_t *count)
     net_scan_state_t state;
     size_t n = 0;
 
-    if (!s_started) {
+    if (!atomic_load_explicit(&s_started, memory_order_acquire)) {
         if (count != NULL) {
             *count = 0;
         }
@@ -475,7 +553,7 @@ esp_err_t net_service_connect(const char *ssid, const char *password)
     size_t ssid_len = (ssid != NULL) ? strlen(ssid) : 0;
     size_t pass_len = (password != NULL) ? strlen(password) : 0;
 
-    if (!s_started) {
+    if (!atomic_load_explicit(&s_started, memory_order_acquire)) {
         return ESP_ERR_INVALID_STATE;
     }
     if (ssid_len == 0 || ssid_len > NET_SSID_MAX_LEN ||
@@ -492,7 +570,10 @@ esp_err_t net_service_connect(const char *ssid, const char *password)
     cfg.sta.threshold.authmode = (pass_len > 0) ? WIFI_AUTH_WPA2_PSK : WIFI_AUTH_OPEN;
     cfg.sta.sae_pwe_h2e = WPA3_SAE_PWE_BOTH;
 
+    xSemaphoreTake(s_wifi_cfg_lock, portMAX_DELAY);
+
     lock();
+    s_connect_gen++;
     memset(&s_status, 0, sizeof(s_status));
     s_status.state = NET_STATE_CONNECTING;
     memcpy(s_status.ssid, ssid, ssid_len);
@@ -505,7 +586,7 @@ esp_err_t net_service_connect(const char *ssid, const char *password)
     ESP_LOGI(TAG, "Connecting to \"%s\"", ssid);
 
     /* 当前网络可能没连上，disconnect 报错可以忽略 */
-    esp_wifi_disconnect();
+    (void)esp_wifi_disconnect();
     /* 先只改内存里的配置；连上之后再写 NVS（见 on_got_ip） */
     esp_err_t err = esp_wifi_set_storage(WIFI_STORAGE_RAM);
     if (err == ESP_OK) {
@@ -525,22 +606,28 @@ esp_err_t net_service_connect(const char *ssid, const char *password)
         memset(&s_pending_cfg, 0, sizeof(s_pending_cfg));
         unlock();
     }
+
+    xSemaphoreGive(s_wifi_cfg_lock);
     return err;
 }
 
 void net_service_disconnect(void)
 {
-    if (!s_started) {
+    if (!atomic_load_explicit(&s_started, memory_order_acquire)) {
         return;
     }
+
+    xSemaphoreTake(s_wifi_cfg_lock, portMAX_DELAY);
     lock();
+    s_connect_gen++;
     memset(&s_status, 0, sizeof(s_status));
     s_status.state = NET_STATE_DISCONNECTED;
     s_persist_pending = false;
     memset(&s_pending_cfg, 0, sizeof(s_pending_cfg));
     unlock();
 
-    esp_wifi_disconnect();
+    (void)esp_wifi_disconnect();
+    xSemaphoreGive(s_wifi_cfg_lock);
 }
 
 void net_service_get_status(net_status_t *out)
@@ -548,7 +635,7 @@ void net_service_get_status(net_status_t *out)
     if (out == NULL) {
         return;
     }
-    if (!s_started) {
+    if (!atomic_load_explicit(&s_started, memory_order_acquire)) {
         memset(out, 0, sizeof(*out));
         out->state = NET_STATE_DISCONNECTED;
         return;

@@ -235,18 +235,20 @@ static void handle_bus_health(int64_t *last_err_log_us, int64_t *last_recover_us
         ESP_LOGW(TAG, "state changed: %s -> %s", state_to_str(old_sta), state_to_str(new_sta));
     }
 
-    uint32_t flags = atomic_exchange_explicit(&s_bus_err_flags_acc, 0U, memory_order_relaxed);
-    if (flags != 0U && (now_us - *last_err_log_us) >= CAN_ERR_LOG_INTERVAL_US) {
-        twai_error_flags_t ef = { .val = flags };
-        twai_node_status_t status = {0};
-        (void)twai_node_get_info(s_node, &status, NULL);
-        ESP_LOGW(TAG, "bus error (total=%lu, flags=0x%lX: ack=%u bit=%u stuff=%u form=%u arb=%u, TEC=%u REC=%u)",
-                 (unsigned long)atomic_load_explicit(&s_bus_err_count, memory_order_relaxed),
-                 (unsigned long)flags,
-                 (unsigned)ef.ack_err, (unsigned)ef.bit_err, (unsigned)ef.stuff_err,
-                 (unsigned)ef.form_err, (unsigned)ef.arb_lost,
-                 (unsigned)status.tx_error_count, (unsigned)status.rx_error_count);
-        *last_err_log_us = now_us;
+    if ((now_us - *last_err_log_us) >= CAN_ERR_LOG_INTERVAL_US) {
+        uint32_t flags = atomic_exchange_explicit(&s_bus_err_flags_acc, 0U, memory_order_relaxed);
+        if (flags != 0U) {
+            twai_error_flags_t ef = { .val = flags };
+            twai_node_status_t status = {0};
+            (void)twai_node_get_info(s_node, &status, NULL);
+            ESP_LOGW(TAG, "bus error (total=%lu, flags=0x%lX: ack=%u bit=%u stuff=%u form=%u arb=%u, TEC=%u REC=%u)",
+                     (unsigned long)atomic_load_explicit(&s_bus_err_count, memory_order_relaxed),
+                     (unsigned long)flags,
+                     (unsigned)ef.ack_err, (unsigned)ef.bit_err, (unsigned)ef.stuff_err,
+                     (unsigned)ef.form_err, (unsigned)ef.arb_lost,
+                     (unsigned)status.tx_error_count, (unsigned)status.rx_error_count);
+            *last_err_log_us = now_us;
+        }
     }
 
     twai_node_status_t status = {0};
@@ -272,6 +274,10 @@ static void can_task(void *arg)
 
     while (atomic_load_explicit(&s_running, memory_order_acquire)) {
         if (xQueueReceive(s_rx_queue, &msg, pdMS_TO_TICKS(CAN_TASK_POLL_MS)) == pdTRUE) {
+            if (!atomic_load_explicit(&s_running, memory_order_acquire)) {
+                break;
+            }
+
             can_rx_cb_t cb;
             void *cb_ctx;
 
@@ -291,6 +297,10 @@ static void can_task(void *arg)
             if (cb != NULL) {
                 cb(&msg, cb_ctx);
             }
+        }
+
+        if (!atomic_load_explicit(&s_running, memory_order_acquire)) {
+            break;
         }
 
         handle_bus_health(&last_err_log_us, &last_recover_us);
@@ -401,9 +411,13 @@ esp_err_t can_service_stop(void)
     atomic_store_explicit(&s_running, false, memory_order_release);
 
     if (s_task != NULL) {
-        /* 最多等待 500 ms 让后台任务自然退出 */
-        for (int i = 0; i < 50 && !atomic_load_explicit(&s_task_exited, memory_order_acquire); i++) {
+        /* 最多等待 1000 ms 让后台任务自然退出；若未退出则不能释放仍被占用的句柄 */
+        for (int i = 0; i < 100 && !atomic_load_explicit(&s_task_exited, memory_order_acquire); i++) {
             vTaskDelay(pdMS_TO_TICKS(10));
+        }
+        if (!atomic_load_explicit(&s_task_exited, memory_order_acquire)) {
+            ESP_LOGE(TAG, "can_task did not exit in time, aborting teardown");
+            return ESP_ERR_TIMEOUT;
         }
         s_task = NULL;
     }
@@ -520,7 +534,7 @@ esp_err_t can_service_get_stats(can_stats_t *out)
     if (out == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
-    if (s_node == NULL) {
+    if (!atomic_load_explicit(&s_running, memory_order_acquire) || s_node == NULL) {
         return ESP_ERR_INVALID_STATE;
     }
 

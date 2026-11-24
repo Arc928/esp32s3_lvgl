@@ -10,8 +10,18 @@
 #include <string.h>
 
 #define TAG "APP_EVENT"
+#define APP_EVENT_POST_TIMEOUT_MS   100
 
 ESP_EVENT_DEFINE_BASE(APP_EVENTS);
+
+static esp_err_t post_event(app_event_id_t id, const void *data, size_t size, const char *name)
+{
+    esp_err_t err = esp_event_post(APP_EVENTS, id, data, size, pdMS_TO_TICKS(APP_EVENT_POST_TIMEOUT_MS));
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to post %s: %s", name, esp_err_to_name(err));
+    }
+    return err;
+}
 
 /* ==================== 公开接口 ==================== */
 
@@ -21,48 +31,27 @@ void app_event_init(void)
     ESP_LOGI(TAG, "App event system initialized");
 }
 
-void app_event_publish_imu_data(const app_imu_data_t *data)
-{
-    esp_event_post(APP_EVENTS, APP_IMU_DATA_UPDATED,
-                   data, sizeof(*data), portMAX_DELAY);
-}
-
 void app_event_publish_time_sync_started(void)
 {
-    esp_event_post(APP_EVENTS, APP_TIME_SYNC_STARTED, NULL, 0, portMAX_DELAY);
+    (void)post_event(APP_TIME_SYNC_STARTED, NULL, 0, "time sync started");
 }
 
 void app_event_publish_time_synced(void)
 {
-    esp_event_post(APP_EVENTS, APP_TIME_SYNCED, NULL, 0, portMAX_DELAY);
+    (void)post_event(APP_TIME_SYNCED, NULL, 0, "time synced");
 }
 
 void app_event_publish_time_sync_failed(void)
 {
-    esp_event_post(APP_EVENTS, APP_TIME_SYNC_FAILED, NULL, 0, portMAX_DELAY);
+    (void)post_event(APP_TIME_SYNC_FAILED, NULL, 0, "time sync failed");
 }
 
 void app_event_publish_mqtt_status(bool connected)
 {
-    esp_event_post(APP_EVENTS, 
-                   connected ? APP_MQTT_CONNECTED : APP_MQTT_DISCONNECTED, 
-                   NULL, 0, portMAX_DELAY);
-    
+    (void)post_event(connected ? APP_MQTT_CONNECTED : APP_MQTT_DISCONNECTED,
+                     NULL, 0, connected ? "MQTT connected" : "MQTT disconnected");
+
     ESP_LOGI(TAG, "MQTT %s", connected ? "connected" : "disconnected");
-}
-
-void app_event_publish_mqtt_publish_result(bool success, const char *topic)
-{
-    if (topic == NULL) {
-        topic = "";
-    }
-
-    // 事件循环会拷贝数据，长度要包含结尾的 '\0'
-    esp_event_post(APP_EVENTS,
-                   success ? APP_MQTT_PUBLISH_SUCCESS : APP_MQTT_PUBLISH_FAILED,
-                   topic, strlen(topic) + 1, portMAX_DELAY);
-
-    ESP_LOGD(TAG, "MQTT publish %s: %s", success ? "success" : "failed", topic);
 }
 
 const char *app_control_action_to_str(app_control_action_t action)
@@ -97,10 +86,7 @@ void app_event_publish_device_control(const app_device_control_t *cmd)
         return;
     }
 
-    esp_err_t err = esp_event_post(APP_EVENTS, APP_MQTT_DEVICE_CONTROL,
-                                   cmd, sizeof(*cmd), pdMS_TO_TICKS(100));
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "Failed to post device control event: %s", esp_err_to_name(err));
+    if (post_event(APP_MQTT_DEVICE_CONTROL, cmd, sizeof(*cmd), "device control") != ESP_OK) {
         return;
     }
 
@@ -110,24 +96,14 @@ void app_event_publish_device_control(const app_device_control_t *cmd)
 
 void app_event_publish_sensor_error(const char *sensor_name, int error_code)
 {
-    char error_msg[64];
-    snprintf(error_msg, sizeof(error_msg), "%s error: %d", sensor_name, error_code);
-    
-    esp_event_post(APP_EVENTS, APP_SENSOR_ERROR, 
-                   error_msg, sizeof(error_msg), portMAX_DELAY);
-    
-    ESP_LOGE(TAG, "%s", error_msg);
-}
-
-void app_event_publish_network_error(const char *error_msg)
-{
-    if (error_msg == NULL) {
-        error_msg = "";
+    if (sensor_name == NULL) {
+        sensor_name = "unknown";
     }
 
-    // 事件循环会拷贝数据，长度要包含结尾的 '\0'
-    esp_event_post(APP_EVENTS, APP_NETWORK_ERROR,
-                   error_msg, strlen(error_msg) + 1, portMAX_DELAY);
-    
-    ESP_LOGE(TAG, "Network error: %s", error_msg);
+    char error_msg[64];
+    snprintf(error_msg, sizeof(error_msg), "%s error: %d", sensor_name, error_code);
+
+    (void)post_event(APP_SENSOR_ERROR, error_msg, strlen(error_msg) + 1, "sensor error");
+
+    ESP_LOGE(TAG, "%s", error_msg);
 }

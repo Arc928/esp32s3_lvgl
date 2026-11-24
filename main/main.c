@@ -132,12 +132,16 @@ void app_main(void)
     log_free_heap("UI");
 
     // 8) Start SNTP time sync and MQTT (both wait for IP), then connect Wi-Fi.
-    //    If the broker is unreachable the device keeps running and esp-mqtt retries.
-    time_service_start();
+    //    If the broker or Wi-Fi is unavailable the device keeps running offline.
+    if (time_service_start() != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start time service");
+    }
     if (mqtt_service_start() != ESP_OK) {
         ESP_LOGE(TAG, "Failed to start MQTT service");
     }
-    net_service_start();
+    if (net_service_start() != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start net service");
+    }
     log_free_heap("Wi-Fi start");
 
     // 9) Main loop (currently keeps task alive)

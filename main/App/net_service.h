@@ -72,8 +72,9 @@ typedef struct {
 /**
  * @brief 初始化并启动 Wi-Fi（STA 模式），有凭据时自动开始连接
  * @note 不阻塞，连接结果用 net_service_get_status() 查询。需在 app_event_init() 和 NVS 初始化之后调用
+ * @return ESP_OK；Wi-Fi 驱动初始化或启动失败时返回错误（不触发整机重启）
  */
-void net_service_start(void);
+esp_err_t net_service_start(void);
 
 /**
  * @brief 开始扫描附近的 Wi-Fi（异步）

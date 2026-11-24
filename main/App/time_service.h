@@ -8,10 +8,13 @@
 #ifndef _TIME_SERVICE_H_
 #define _TIME_SERVICE_H_
 
+#include "esp_err.h"
+
 /**
  * @brief 设置时区并订阅 IP_EVENT_STA_GOT_IP，每次联网后自动对时
  * @note 需在联网（net_service_start）之前调用
+ * @return ESP_OK；定时器创建或事件注册失败时返回错误
  */
-void time_service_start(void);
+esp_err_t time_service_start(void);
 
 #endif /* _TIME_SERVICE_H_ */

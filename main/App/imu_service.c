@@ -8,6 +8,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
+#include "app_event.h"
 #include "mpu6050.h"
 
 #define TAG "IMU_SERVICE"
@@ -92,7 +93,6 @@ static void imu_task(void *arg)
             }
             fail_count = 0;
             set_latest(&data);
-            app_event_publish_imu_data(&data);
         } else if (++fail_count >= IMU_OFFLINE_FAIL_COUNT) {
             /* 连续读不到数据：可能断线或芯片掉电，DMP 配置已丢失，需要重新初始化 */
             go_offline(ESP_ERR_TIMEOUT, "no data");

@@ -1,217 +1,164 @@
+/*
+ * time_service.c
+ * 时间服务 - 设置时区，拿到 IP 后通过 esp_netif_sntp 异步对时
+ *
+ * 首次拿到 IP 时初始化一次 esp_netif_sntp（此时 esp_netif / lwIP tcpip 线程已就绪）；
+ * 之后重连拿到新 IP 时调用 esp_netif_sntp_start() 触发立即重同步，不再反复创建临时任务
+ * 或 init/deinit SNTP。对时超时通过单次 esp_timer 上报 APP_TIME_SYNC_FAILED，lwIP 底层
+ * 仍会按退避策略继续在后台校时。
+ */
+
 #include "time_service.h"
-#include <string.h>
+
+#include <stdatomic.h>
+#include <stdbool.h>
+#include <stdlib.h>
 #include <time.h>
 #include <sys/time.h>
-#include "esp_system.h"
+
+#include "esp_check.h"
 #include "esp_event.h"
 #include "esp_log.h"
-#include "esp_attr.h"
-#include "esp_sleep.h"
-#include "nvs_flash.h"
-#include "esp_netif_sntp.h"
-#include "lwip/ip_addr.h"
-#include "esp_sntp.h"
 #include "esp_netif.h"
+#include "esp_netif_sntp.h"
+#include "esp_timer.h"
 #include "app_event.h"
 
-static const char *TAG = "time_service";
+#define TAG                     "time_service"
+#define SNTP_SERVER_HOST        "ntp.aliyun.com"
+#define SNTP_SYNC_TIMEOUT_US    (30LL * 1000 * 1000)
+#define TIME_VALID_MIN_YEAR     (2016 - 1900)
 
-#ifndef INET6_ADDRSTRLEN
-#define INET6_ADDRSTRLEN 48
-#endif
+static bool s_started = false;
+static bool s_sntp_inited = false;              /* 仅在默认事件循环任务里读写 */
+static atomic_bool s_sync_in_progress = false;
+static esp_timer_handle_t s_timeout_timer = NULL;
 
-// 同步状态标志
-static bool sntp_sync_in_progress = false;
-static bool time_is_set = false;
-
-// 前向声明
-static void time_sync_notification_cb(struct timeval *tv);
-static void sntp_time_sync(void);
-static void sntp_sync_task(void *pvParameters);
-static void sntp_event_handler(void* arg, esp_event_base_t event_base,
-                                int32_t event_id, void* event_data);
-static void print_servers(void);
-static esp_err_t sntp_sync_with_retry(int timeout_ms);
-
-// 网络事件处理函数 - 拿到 IP 后触发时间同步
-// 直接订阅 ESP-IDF 的 IP_EVENT，Wi-Fi 驱动不需要知道 SNTP 的存在
-static void sntp_event_handler(void* arg, esp_event_base_t event_base,
-                                int32_t event_id, void* event_data)
-{
-    if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
-        ESP_LOGI(TAG, "Got IP, triggering time sync");
-        // 如果没有正在进行的同步，触发时间同步
-        if (!sntp_sync_in_progress) {
-            // sntp_time_sync();    //不可以在这里直接调用这个函数，因为这个函数会阻塞
-            // 创建任务
-            xTaskCreate(
-                sntp_sync_task,   // 1. 刚才写的任务函数名
-                "sntp_sync_task", // 2. 任务的名字（调试用）
-                4096,             // 3. 栈空间大小（SNTP/网络操作建议 4096）
-                NULL,             // 4. 传递给任务的参数（这里没有，传 NULL）
-                5,                // 5. 任务优先级（中等即可）
-                NULL              // 6. 任务句柄（不需要控制它，传 NULL）
-            );
-        } else {
-            ESP_LOGI(TAG, "SNTP sync already in progress, skipping");
-        }
-    }
-}
-
+/* 运行在 lwIP tcpip 线程 */
 static void time_sync_notification_cb(struct timeval *tv)
 {
-    ESP_LOGI(TAG, "Time synchronization event notification");
-
-    // 更新同步状态
-    sntp_sync_in_progress = false;
-    time_is_set = true;
-
-    // 发送同步完成事件
-    app_event_publish_time_synced();
-}
-
-static void print_servers(void)
-{
-    ESP_LOGI(TAG, "List of configured NTP servers:");
-
-    for (uint8_t i = 0; i < SNTP_MAX_SERVERS; ++i){
-        if (esp_sntp_getservername(i)){
-            ESP_LOGI(TAG, "server %d: %s", i, esp_sntp_getservername(i));
-        } else {
-            // we have either IPv4 or IPv6 address, let's print it
-            char buff[INET6_ADDRSTRLEN];
-            ip_addr_t const *ip = esp_sntp_getserver(i);
-            if (ipaddr_ntoa_r(ip, buff, INET6_ADDRSTRLEN) != NULL)
-                ESP_LOGI(TAG, "server %d: %s", i, buff);
-        }
-    }
-}
-
-// 可重入的时间同步函数 - 支持多次调用
-static esp_err_t sntp_sync_with_retry(int timeout_ms)
-{
-    // 如果已经在同步中，返回错误
-    if (sntp_sync_in_progress) {
-        ESP_LOGW(TAG, "SNTP sync already in progress");
-        return ESP_ERR_INVALID_STATE;
+    if (s_timeout_timer != NULL) {
+        (void)esp_timer_stop(s_timeout_timer);
     }
 
-    esp_sntp_config_t config = ESP_NETIF_SNTP_DEFAULT_CONFIG("ntp.aliyun.com");
-    config.sync_cb = time_sync_notification_cb;
+    atomic_store_explicit(&s_sync_in_progress, false, memory_order_release);
 
-    ESP_LOGI(TAG, "Initializing SNTP...");
-    esp_netif_sntp_init(&config);
-    print_servers();
-
-    // 发送同步开始事件
-    app_event_publish_time_sync_started();
-
-    sntp_sync_in_progress = true;
-
-    // 等待时间同步
-    time_t now = 0;
-    struct tm timeinfo = { 0 };
-    int retry = 0;
-    const int max_retries = timeout_ms / 2000;  // 每2秒检查一次
-
-    ESP_LOGI(TAG, "Waiting for time synchronization...");
-
-    while (esp_netif_sntp_sync_wait(2000 / portTICK_PERIOD_MS) == ESP_ERR_TIMEOUT &&
-           ++retry < max_retries) {
-        ESP_LOGI(TAG, "Waiting for system time to be set... (%d/%d)", retry, max_retries);
-    }
-
-    time(&now);
-    localtime_r(&now, &timeinfo);
-
-    if (timeinfo.tm_year >= (2016 - 1900)) {
-        ESP_LOGI(TAG, "Time synchronized successfully");
-        esp_netif_sntp_deinit();
-        sntp_sync_in_progress = false;
-        time_is_set = true;
-        return ESP_OK;
-    } else {
-        ESP_LOGE(TAG, "Time synchronization failed after %d retries", max_retries);
-        sntp_sync_in_progress = false;
-        time_is_set = false;
-        app_event_publish_time_sync_failed();
-        return ESP_ERR_TIMEOUT;
-    }
-}
-
-void time_service_start(void)
-{
-    // 注册事件处理程序
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(
-        IP_EVENT,
-        IP_EVENT_STA_GOT_IP,
-        &sntp_event_handler,
-        NULL,
-        NULL));
-
-    time_t now;
+    time_t now = (tv != NULL) ? tv->tv_sec : time(NULL);
     struct tm timeinfo;
-    time(&now);
-    localtime_r(&now, &timeinfo);
-
-    // 检查时间是否已经设置
-    if (timeinfo.tm_year >= (2016 - 1900)) {
-        time_is_set = true;
-        ESP_LOGI(TAG, "Time is already set");
-    } else {
-        time_is_set = false;
-        ESP_LOGI(TAG, "Time is not set yet. Will sync when WiFi connects.");
-    }
-
-    // 设置时区
-    setenv("TZ", "CST-8", 1);
-    tzset();
-
-    // 打印当前时间
     char strftime_buf[64];
     localtime_r(&now, &timeinfo);
     strftime(strftime_buf, sizeof(strftime_buf), "%c", &timeinfo);
-    ESP_LOGI(TAG, "Current date/time in Shanghai: %s", strftime_buf);
+    ESP_LOGI(TAG, "Synchronized date/time in Shanghai: %s", strftime_buf);
+
+    app_event_publish_time_synced();
 }
 
-static void sntp_time_sync(void)
+/* 运行在 esp_timer 任务 */
+static void on_sync_timeout(void *arg)
 {
-    // 如果时间已设置且不在同步中，这里可以选择是否重新同步
-    // 根据你的需求，这里设置为每次WiFi连接都同步
-    if (time_is_set && !sntp_sync_in_progress) {
-        ESP_LOGI(TAG, "Re-syncing time (time was previously set)");
-    }
+    (void)arg;
 
-    if (sntp_sync_in_progress) {
-        ESP_LOGW(TAG, "SNTP sync already in progress, skipping");
+    if (atomic_exchange_explicit(&s_sync_in_progress, false, memory_order_acq_rel)) {
+        ESP_LOGW(TAG, "SNTP sync timed out after 30 s (continuing retries in background)");
+        app_event_publish_time_sync_failed();
+    }
+}
+
+/* 运行在默认事件循环任务（串行执行） */
+static void sntp_event_handler(void *arg, esp_event_base_t event_base,
+                               int32_t event_id, void *event_data)
+{
+    (void)arg;
+    (void)event_data;
+
+    if (event_base != IP_EVENT || event_id != IP_EVENT_STA_GOT_IP) {
         return;
     }
 
-    // 执行时间同步（等待最多30秒）
-    esp_err_t result = sntp_sync_with_retry(30000);
-
-    if (result == ESP_OK) {
-        // 打印同步后的时间
-        time_t now;
-        struct tm timeinfo;
-        time(&now);
-        localtime_r(&now, &timeinfo);
-
-        char strftime_buf[64];
-        strftime(strftime_buf, sizeof(strftime_buf), "%c", &timeinfo);
-        ESP_LOGI(TAG, "Synchronized date/time in Shanghai: %s", strftime_buf);
+    /* 先武装状态与超时定时器，再启动 SNTP，避免极快响应时回调先于置位执行 */
+    (void)esp_timer_stop(s_timeout_timer);
+    atomic_store_explicit(&s_sync_in_progress, true, memory_order_release);
+    esp_err_t timer_err = esp_timer_start_once(s_timeout_timer, SNTP_SYNC_TIMEOUT_US);
+    if (timer_err != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to start SNTP timeout timer: %s", esp_err_to_name(timer_err));
     }
+
+    esp_err_t err;
+    if (!s_sntp_inited) {
+        esp_sntp_config_t config = ESP_NETIF_SNTP_DEFAULT_CONFIG(SNTP_SERVER_HOST);
+        config.wait_for_sync = false;
+        config.start = true;
+        config.sync_cb = time_sync_notification_cb;
+
+        err = esp_netif_sntp_init(&config);
+        if (err != ESP_OK) {
+            (void)esp_timer_stop(s_timeout_timer);
+            atomic_store_explicit(&s_sync_in_progress, false, memory_order_release);
+            ESP_LOGE(TAG, "esp_netif_sntp_init failed: %s", esp_err_to_name(err));
+            app_event_publish_time_sync_failed();
+            return;
+        }
+        s_sntp_inited = true;
+        ESP_LOGI(TAG, "Got IP, SNTP started (server: %s)", SNTP_SERVER_HOST);
+    } else {
+        err = esp_netif_sntp_start();
+        if (err != ESP_OK) {
+            (void)esp_timer_stop(s_timeout_timer);
+            atomic_store_explicit(&s_sync_in_progress, false, memory_order_release);
+            ESP_LOGW(TAG, "esp_netif_sntp_start failed: %s", esp_err_to_name(err));
+            app_event_publish_time_sync_failed();
+            return;
+        }
+        ESP_LOGI(TAG, "Got IP, SNTP re-sync triggered");
+    }
+
+    app_event_publish_time_sync_started();
 }
 
-// 任务函数：专门负责后台同步
-static void sntp_sync_task(void *pvParameters) 
+esp_err_t time_service_start(void)
 {
-    ESP_LOGI("SNTP_TASK", "同步任务启动...");
-    
-    sntp_time_sync(); 
+    if (s_started) {
+        return ESP_OK;
+    }
 
-    ESP_LOGI("SNTP_TASK", "同步任务完成，正在自毁...");
-    
-    // 任务执行完后必须删除自己，否则会内存泄漏或报错
-    vTaskDelete(NULL); 
+    /* 先设置时区，后续 localtime_r 均按东八区格式化 */
+    setenv("TZ", "CST-8", 1);
+    tzset();
+
+    time_t now = 0;
+    struct tm timeinfo = {0};
+    time(&now);
+    localtime_r(&now, &timeinfo);
+
+    if (timeinfo.tm_year >= TIME_VALID_MIN_YEAR) {
+        ESP_LOGI(TAG, "Time is already set");
+    } else {
+        ESP_LOGI(TAG, "Time is not set yet. Will sync when Wi-Fi connects.");
+    }
+
+    char strftime_buf[64];
+    strftime(strftime_buf, sizeof(strftime_buf), "%c", &timeinfo);
+    ESP_LOGI(TAG, "Current date/time in Shanghai: %s", strftime_buf);
+
+    const esp_timer_create_args_t timer_args = {
+        .callback = on_sync_timeout,
+        .name = "sntp_timeout",
+    };
+    esp_err_t ret = esp_timer_create(&timer_args, &s_timeout_timer);
+    ESP_RETURN_ON_ERROR(ret, TAG, "failed to create SNTP timeout timer");
+
+    ret = esp_event_handler_instance_register(IP_EVENT,
+                                              IP_EVENT_STA_GOT_IP,
+                                              &sntp_event_handler,
+                                              NULL,
+                                              NULL);
+    if (ret != ESP_OK) {
+        (void)esp_timer_delete(s_timeout_timer);
+        s_timeout_timer = NULL;
+        ESP_LOGE(TAG, "failed to register IP event handler: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    s_started = true;
+    return ESP_OK;
 }
