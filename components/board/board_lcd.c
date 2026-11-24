@@ -18,7 +18,7 @@ esp_err_t board_lcd_init(esp_lcd_panel_handle_t *panel_handle)
 
     esp_lcd_rgb_panel_config_t panel_config = {
         .data_width = BOARD_LCD_DATA_WIDTH,
-        .bits_per_pixel = BOARD_LCD_BITS_PER_PIXEL,
+        .in_color_format = BOARD_LCD_COLOR_FORMAT,
         .dma_burst_size = 64,
         /* 帧缓冲数量取决于 LVGL 适配层的防撕裂模式，两边要一致 */
         .num_fbs = esp_lv_adapter_get_required_frame_buffer_count(BOARD_DISPLAY_TEAR_AVOID_MODE,

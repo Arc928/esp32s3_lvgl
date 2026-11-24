@@ -17,7 +17,7 @@
 #define BOARD_LCD_V_RES                 480
 #define BOARD_LCD_PIXEL_CLOCK_HZ        (16 * 1000 * 1000)
 #define BOARD_LCD_DATA_WIDTH            16
-#define BOARD_LCD_BITS_PER_PIXEL        16
+#define BOARD_LCD_COLOR_FORMAT          LCD_COLOR_FMT_RGB565
 #define BOARD_LCD_BOUNCE_BUFFER_PX      (BOARD_LCD_H_RES * 20)
 
 /* 时序 */
