@@ -45,10 +45,8 @@
 #define get_ms      get_tick_count
 
 #elif defined MOTION_DRIVER_TARGET_MSP430
-// #include "msp430.h"
-// #include "msp430_clock.h"
-#define delay_ms    delay_ms
-#define get_ms      mget_ms
+#define delay_ms    mpu6050_delay_ms
+#define get_ms      mpu6050_get_ms
 #define log_i(...)     do {} while (0)
 #define log_e(...)     do {} while (0)
 

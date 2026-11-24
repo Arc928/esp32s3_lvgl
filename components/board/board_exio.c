@@ -51,22 +51,40 @@ esp_err_t board_exio_init(i2c_master_bus_handle_t bus)
         return ESP_OK;
     }
 
-    ESP_RETURN_ON_ERROR(add_device(bus, CH422G_ADDR_SYSTEM, &s_system_dev), TAG, "failed to add CH422G");
-    ESP_RETURN_ON_ERROR(add_device(bus, CH422G_ADDR_OUTPUT, &s_output_dev), TAG, "failed to add CH422G");
+    esp_err_t ret = ESP_OK;
+
+    ESP_GOTO_ON_ERROR(add_device(bus, CH422G_ADDR_SYSTEM, &s_system_dev), err, TAG, "failed to add CH422G");
+    ESP_GOTO_ON_ERROR(add_device(bus, CH422G_ADDR_OUTPUT, &s_output_dev), err, TAG, "failed to add CH422G");
 
     s_lock = xSemaphoreCreateMutex();
-    ESP_RETURN_ON_FALSE(s_lock != NULL, ESP_ERR_NO_MEM, TAG, "no mem for lock");
+    ESP_GOTO_ON_FALSE(s_lock != NULL, ESP_ERR_NO_MEM, err, TAG, "no mem for lock");
 
     /*
      * 先写好输出电平再打开输出，免得屏幕复位脚、背光脚在打开输出的瞬间被拉低；
      * 打开后再写一次，确保电平生效。
      */
     s_output = BOARD_EXIO_DEFAULT_OUTPUT;
-    ESP_RETURN_ON_ERROR(write_byte(s_output_dev, s_output), TAG, "CH422G not responding");
-    ESP_RETURN_ON_ERROR(write_byte(s_system_dev, CH422G_SYSTEM_IO_OUTPUT), TAG, "failed to enable outputs");
-    ESP_RETURN_ON_ERROR(write_byte(s_output_dev, s_output), TAG, "failed to set outputs");
+    ESP_GOTO_ON_ERROR(write_byte(s_output_dev, s_output), err, TAG, "CH422G not responding");
+    ESP_GOTO_ON_ERROR(write_byte(s_system_dev, CH422G_SYSTEM_IO_OUTPUT), err, TAG, "failed to enable outputs");
+    ESP_GOTO_ON_ERROR(write_byte(s_output_dev, s_output), err, TAG, "failed to set outputs");
 
     return ESP_OK;
+
+err:
+    if (s_lock != NULL) {
+        vSemaphoreDelete(s_lock);
+        s_lock = NULL;
+    }
+    if (s_output_dev != NULL) {
+        (void)i2c_master_bus_rm_device(s_output_dev);
+        s_output_dev = NULL;
+    }
+    if (s_system_dev != NULL) {
+        (void)i2c_master_bus_rm_device(s_system_dev);
+        s_system_dev = NULL;
+    }
+    s_output = 0;
+    return ret;
 }
 
 esp_err_t board_exio_set(uint8_t pin, bool level)

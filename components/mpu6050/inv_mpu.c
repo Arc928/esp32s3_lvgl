@@ -55,16 +55,10 @@
 #define min(a,b) ((a<b)?a:b)
    
 #elif defined MOTION_DRIVER_TARGET_MSP430
-// #include "msp430.h"
-// #include "msp430_i2c.h"
-// #include "msp430_clock.h"
-// #include "msp430_interrupt.h"
-#define i2c_write   i2c_write
-#define i2c_read    i2c_read
-#define delay_ms    delay_ms
-#define get_ms      mget_ms
-
-void mget_ms(unsigned long *times) {}
+#define i2c_write   mpu6050_i2c_write
+#define i2c_read    mpu6050_i2c_read
+#define delay_ms    mpu6050_delay_ms
+#define get_ms      mpu6050_get_ms
 
 // static inline int reg_int_cb(struct int_param_s *int_param)
 // {
