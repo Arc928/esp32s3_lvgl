@@ -2,8 +2,10 @@ CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 CONFIG_COMPILER_OPTIMIZATION_PERF=y
 
-# FreeRTOS configuration
+# FreeRTOS / main task configuration
 CONFIG_FREERTOS_HZ=1000
+# app_main 里要建整个界面，默认的 3584 字节栈不够稳妥；app_main 返回后主任务栈会被回收
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
 
 # LVGL configuration
 # LVGL 的堆放 PSRAM（components/board/board_lv_mem.c）：默认的 malloc 会把小块优先放进内部 RAM，
@@ -32,7 +34,6 @@ CONFIG_LV_ASSERT_HANDLER_INCLUDE=""
 CONFIG_LV_BUILD_EXAMPLES=n
 CONFIG_LV_USE_SYSMON=y
 CONFIG_LV_USE_PERF_MONITOR=y
-CONFIG_LV_USE_DEMO_BENCHMARK=y
 CONFIG_ESP_LVGL_ADAPTER_ENABLE_FPS_STATS=y
 
 # 以下几项原来只存在于已提交的 sdkconfig 里；sdkconfig 不再提交后，要靠这里保证重新生成的配置和现在一致

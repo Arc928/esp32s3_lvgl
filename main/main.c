@@ -8,8 +8,6 @@
  */
 
 #include <stdio.h>
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
 #include "esp_log.h"
 #include "esp_heap_caps.h"
 #include "nvs_flash.h"
@@ -139,9 +137,5 @@ void app_main(void)
     }
     log_free_heap("Wi-Fi start");
 
-    // 9) Main loop (currently keeps task alive)
-    while (1)
-    {
-        vTaskDelay(pdMS_TO_TICKS(1000));
-    }
+    // 9) Return from app_main so ESP-IDF deletes the main task and reclaims its internal RAM stack.
 }
